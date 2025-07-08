@@ -1,5 +1,11 @@
 /**
  * Utility functions for BPMN export plugin
+ * 
+ * NOTE: 使用 bpmn-moddle 重构后，部分函数已不再需要：
+ * - formatXML(): bpmn-moddle 内置格式化功能
+ * - escapeXML()/unescapeXML(): bpmn-moddle 自动处理XML转义
+ * 
+ * 仍需保留的工具函数用于辅助功能
  */
 
 /**
@@ -26,6 +32,7 @@ export function parseConditionExpression(expression: string): string {
 
 /**
  * Format XML with proper indentation
+ * @deprecated 使用 bpmn-moddle 后不再需要，moddle.toXML() 内置格式化
  */
 export function formatXML(xml: string, indent: string = '  '): string {
     const reg = /(>)(<)(\/*)/g;
@@ -58,6 +65,7 @@ export function formatXML(xml: string, indent: string = '  '): string {
 
 /**
  * Escape XML characters
+ * @deprecated 使用 bpmn-moddle 后不再需要，自动处理XML转义
  */
 export function escapeXML(str: string): string {
     if (!str) return '';
@@ -72,6 +80,7 @@ export function escapeXML(str: string): string {
 
 /**
  * Unescape XML characters
+ * @deprecated 使用 bpmn-moddle 后不再需要，自动处理XML转义
  */
 export function unescapeXML(str: string): string {
     if (!str) return '';
