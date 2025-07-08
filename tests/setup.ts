@@ -2,13 +2,21 @@
  * Jest test setup
  */
 
-// Mock bpmn-js since it requires DOM environment
-jest.mock('bpmn-js/lib/Modeler', () => {
+// Mock bpmn-moddle for testing
+jest.mock('bpmn-moddle', () => {
     return jest.fn().mockImplementation(() => ({
-        importXML: jest.fn().mockResolvedValue({}),
-        get: jest.fn().mockReturnValue({
-            getAll: jest.fn().mockReturnValue([])
-        })
+        fromXML: jest.fn().mockResolvedValue({
+            rootElement: {
+                $type: 'bpmn:Definitions',
+                rootElements: []
+            },
+            warnings: [],
+            elementsById: new Map()
+        }),
+        toXML: jest.fn().mockResolvedValue({
+            xml: '<?xml version="1.0" encoding="UTF-8"?>\n<bpmn:definitions/>'
+        }),
+        create: jest.fn().mockImplementation((type, attrs) => ({ $type: type, ...attrs }))
     }));
 });
 

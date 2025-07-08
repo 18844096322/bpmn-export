@@ -3,9 +3,7 @@
  * 使用bpmn-moddle处理BPMN对象模型，专注于X6数据格式转换
  */
 
-// import BpmnModdle from 'bpmn-moddle';
-// Temporarily use any type until bpmn-moddle is properly installed
-declare const BpmnModdle: any;
+import BpmnModdle from 'bpmn-moddle';
 import {
     BpmnExportOptions,
     NodeConverter,
@@ -44,7 +42,10 @@ export class BpmnConverter {
             // 1. 构建BPMN对象模型
             const definitions = this.buildBpmnDefinitions(graphData);
 
-            // 2. 使用bpmn-moddle序列化为XML
+            // 2. 验证BPMN定义
+            const validationWarnings = this.validateBpmnDefinitions(definitions);
+
+            // 3. 使用bpmn-moddle序列化为XML
             const { xml } = await this.moddle.toXML(definitions, {
                 format: this.options.format,
                 preamble: true
@@ -52,10 +53,11 @@ export class BpmnConverter {
 
             return {
                 data: xml,
-                warnings: []
+                warnings: validationWarnings
             };
         } catch (error) {
-            throw new Error(`Failed to convert X6 data to BPMN: ${error}`);
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            throw new Error(`Failed to convert X6 data to BPMN: ${errorMessage}`);
         }
     }
 
@@ -65,19 +67,24 @@ export class BpmnConverter {
     async convertFromBpmn(xml: string): Promise<ConversionResult> {
         try {
             // 1. 使用bpmn-moddle解析XML
-            const { rootElement: definitions, warnings, elementsById } =
-                await this.moddle.fromXML(xml);
+            const parseResult = await this.moddle.fromXML(xml);
+            const { rootElement: definitions, warnings = [], elementsById } = parseResult;
+
+            if (!definitions) {
+                throw new Error('Invalid BPMN XML: No root element found');
+            }
 
             // 2. 从BPMN对象模型提取X6数据
             const graphData = this.extractX6GraphData(definitions);
 
             return {
                 data: graphData,
-                warnings: warnings.map((w: any) => w.message),
+                warnings: warnings.map((w: any) => w.message || String(w)),
                 elementsById
             };
         } catch (error) {
-            throw new Error(`Failed to parse BPMN XML: ${error}`);
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            throw new Error(`Failed to parse BPMN XML: ${errorMessage}`);
         }
     }
 
@@ -462,5 +469,57 @@ export class BpmnConverter {
         });
 
         return data;
+    }
+
+    /**
+     * Validate BPMN definitions and return warnings
+     */
+    private validateBpmnDefinitions(definitions: any): string[] {
+        const warnings: string[] = [];
+
+        // 验证必要元素
+        if (!definitions.targetNamespace) {
+            warnings.push('Missing targetNamespace in definitions');
+        }
+
+        if (!definitions.rootElements || definitions.rootElements.length === 0) {
+            warnings.push('No process elements found in definitions');
+        }
+
+        // 验证流程结构
+        definitions.rootElements?.forEach((element: any) => {
+            if (element.$type === 'bpmn:Process') {
+                const processWarnings = this.validateProcess(element);
+                warnings.push(...processWarnings);
+            }
+        });
+
+        return warnings;
+    }
+
+    /**
+     * Validate individual process element
+     */
+    private validateProcess(process: any): string[] {
+        const warnings: string[] = [];
+        const flowElements = process.flowElements || [];
+
+        // 检查开始事件
+        const startEvents = flowElements.filter((el: any) => 
+            el.$type === 'bpmn:StartEvent'
+        );
+        if (startEvents.length === 0) {
+            warnings.push(`Process ${process.id} has no start event`);
+        }
+
+        // 检查结束事件
+        const endEvents = flowElements.filter((el: any) => 
+            el.$type === 'bpmn:EndEvent'
+        );
+        if (endEvents.length === 0) {
+            warnings.push(`Process ${process.id} has no end event`);
+        }
+
+        return warnings;
     }
 } 

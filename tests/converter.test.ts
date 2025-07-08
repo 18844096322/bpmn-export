@@ -55,7 +55,8 @@ describe('BpmnConverter', () => {
                 ]
             };
 
-            const xml = await converter.convertToBpmn(graphData);
+            const result = await converter.convertToBpmn(graphData);
+            const xml = result.data as string;
 
             expect(xml).toContain('<?xml version="1.0" encoding="UTF-8"?>');
             expect(xml).toContain('<process id="Process_1"');
@@ -96,7 +97,8 @@ describe('BpmnConverter', () => {
                 ]
             };
 
-            const xml = await converter.convertToBpmn(graphData);
+            const result = await converter.convertToBpmn(graphData);
+            const xml = result.data as string;
 
             expect(xml).toContain('<exclusiveGateway id="gateway"');
             expect(xml).toContain('default="defaultFlow"');
@@ -118,17 +120,18 @@ describe('BpmnConverter', () => {
           </process>
         </definitions>`;
 
-            const graphData = await converter.convertFromBpmn(xml);
+            const result = await converter.convertFromBpmn(xml);
+            const graphData = result.data as any; // X6GraphData type
 
             expect(graphData.nodes).toHaveLength(3);
             expect(graphData.edges).toHaveLength(2);
 
-            const startNode = graphData.nodes.find(n => n.id === 'start');
+            const startNode = graphData.nodes.find((n: any) => n.id === 'start');
             expect(startNode).toBeDefined();
             expect(startNode?.shape).toBe('bpmn-start-event');
             expect(startNode?.data?.name).toBe('Start');
 
-            const serviceTask = graphData.nodes.find(n => n.id === 'task1');
+            const serviceTask = graphData.nodes.find((n: any) => n.id === 'task1');
             expect(serviceTask).toBeDefined();
             expect(serviceTask?.shape).toBe('bpmn-service-task');
             expect(serviceTask?.data?.flowable?.class).toBe('com.example.Service');
@@ -167,7 +170,8 @@ describe('BpmnConverter', () => {
                 edges: []
             };
 
-            const xml = await converter.convertToBpmn(graphData);
+            const result = await converter.convertToBpmn(graphData);
+            const xml = result.data as string;
             expect(xml).toContain('<serviceTask id="custom1"');
             expect(xml).toContain('custom:type="special"');
         });
