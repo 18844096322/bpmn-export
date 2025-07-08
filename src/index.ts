@@ -1,132 +1,60 @@
 /**
- * @x6-plugin/bpmn-export
- * 
- * AntV X6 plugin for BPMN XML import/export
+ * X6 BPMN Export Plugin - Main Entry Point
+ * 重构版本，使用bpmn-moddle处理BPMN对象模型
  */
 
 import { Graph } from '@antv/x6';
 import { BpmnConverter } from './converter';
-import { BpmnValidator } from './validator';
-import { BpmnExportOptions, ValidationResult } from './types';
+import { BpmnExportOptions, X6GraphData, ConversionResult } from './types';
 import { defaultOptions } from './config';
 
-export class BpmnExport implements Graph.Plugin {
+/**
+ * BPMN Export Plugin for X6
+ */
+export class BpmnExportPlugin {
     public name = 'bpmn-export';
-    private graph: Graph;
-    private options: Required<BpmnExportOptions>;
     private converter: BpmnConverter;
-    private validator: BpmnValidator;
-    private enabled = true;
+    private graph!: Graph; // Use definite assignment assertion
 
-    constructor(options: BpmnExportOptions = {}) {
-        this.options = { ...defaultOptions, ...options };
-        this.converter = new BpmnConverter(this.options);
-        this.validator = new BpmnValidator(this.options);
+    constructor(options: Partial<BpmnExportOptions> = {}) {
+        this.converter = new BpmnConverter(options);
     }
 
     /**
      * Initialize plugin with graph instance
      */
-    init(graph: Graph): void {
+    init(graph: Graph) {
         this.graph = graph;
-        this.installAPIs();
+        this.setupGraphMethods();
     }
 
     /**
-     * Enable the plugin
+     * Export graph to BPMN XML
      */
-    enable(): void {
-        this.enabled = true;
-    }
-
-    /**
-     * Disable the plugin
-     */
-    disable(): void {
-        this.enabled = false;
-    }
-
-    /**
-     * Check if plugin is enabled
-     */
-    isEnabled(): boolean {
-        return this.enabled;
-    }
-
-    /**
-     * Dispose the plugin
-     */
-    dispose(): void {
-        // Clean up resources if needed
-    }
-
-    /**
-     * Export X6 graph to BPMN XML
-     */
-    async exportXML(): Promise<string> {
-        if (!this.enabled) {
-            throw new Error('BPMN export plugin is disabled');
+    async exportToBpmn(options?: Partial<BpmnExportOptions>): Promise<ConversionResult> {
+        if (options) {
+            this.converter.setOptions(options);
         }
 
-        const graphData = this.graph.toJSON();
+        const graphData = this.extractGraphData();
+        return await this.converter.convertToBpmn(graphData);
+    }
 
-        // Validate if required
-        if (this.options.validateOnExport) {
-            const validation = await this.validate();
-            if (!validation.valid) {
-                throw new Error(`Validation failed: ${validation.errors.join(', ')}`);
-            }
+    /**
+     * Import BPMN XML to graph
+     */
+    async importFromBpmn(xml: string, options?: Partial<BpmnExportOptions>): Promise<ConversionResult> {
+        if (options) {
+            this.converter.setOptions(options);
         }
 
-        return this.converter.convertToBpmn(graphData);
-    }
+        const result = await this.converter.convertFromBpmn(xml);
 
-    /**
-     * Import BPMN XML to X6 graph
-     */
-    async importXML(xml: string): Promise<void> {
-        if (!this.enabled) {
-            throw new Error('BPMN export plugin is disabled');
+        if (result.data && typeof result.data === 'object') {
+            this.applyGraphData(result.data as X6GraphData);
         }
 
-        const graphData = await this.converter.convertFromBpmn(xml);
-        this.graph.fromJSON(graphData);
-    }
-
-    /**
-     * Export graph to BPMN file
-     */
-    async exportToFile(filename?: string): Promise<void> {
-        const xml = await this.exportXML();
-        const blob = new Blob([xml], { type: 'text/xml;charset=utf-8' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = filename || `${this.options.processId}-${Date.now()}.bpmn`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
-    }
-
-    /**
-     * Import BPMN file to graph
-     */
-    async importFromFile(file: File): Promise<void> {
-        const xml = await file.text();
-        await this.importXML(xml);
-    }
-
-    /**
-     * Validate current graph
-     */
-    async validate(): Promise<ValidationResult> {
-        if (!this.enabled) {
-            throw new Error('BPMN export plugin is disabled');
-        }
-
-        const graphData = this.graph.toJSON();
-        return this.validator.validate(graphData);
+        return result;
     }
 
     /**
@@ -137,114 +65,146 @@ export class BpmnExport implements Graph.Plugin {
     }
 
     /**
-     * Register custom edge converter
+     * Register custom edge converter  
      */
     registerEdgeConverter(edgeType: string, converter: any): void {
         this.converter.registerEdgeConverter(edgeType, converter);
     }
 
     /**
-     * Get converter instance
-     */
-    getConverter(): BpmnConverter {
-        return this.converter;
-    }
-
-    /**
-     * Get validator instance
-     */
-    getValidator(): BpmnValidator {
-        return this.validator;
-    }
-
-    /**
-     * Update options
+     * Update converter options
      */
     setOptions(options: Partial<BpmnExportOptions>): void {
-        this.options = { ...this.options, ...options };
-        this.converter.setOptions(this.options);
-        this.validator.setOptions(this.options);
+        this.converter.setOptions(options);
     }
 
     /**
-     * Install Graph prototype methods
+     * Extract graph data from X6 Graph
      */
-    private installAPIs(): void {
-        const plugin = this;
+    private extractGraphData(): X6GraphData {
+        const cells = this.graph.getCells();
+        const nodes = cells.filter(cell => cell.isNode()).map(node => ({
+            id: node.id,
+            shape: node.shape,
+            x: node.position().x,
+            y: node.position().y,
+            width: node.size().width,
+            height: node.size().height,
+            label: String(node.getAttrs()?.text?.text || ''),
+            data: (node as any).getData?.() || {}
+        }));
 
-        // Extend Graph prototype with BPMN methods
-        Object.defineProperties(Graph.prototype, {
-            exportBPMN: {
-                value: async function (this: Graph, filename?: string) {
-                    const bpmnPlugin = this.getPlugin<BpmnExport>('bpmn-export');
-                    if (bpmnPlugin) {
-                        await bpmnPlugin.exportToFile(filename);
-                    } else {
-                        throw new Error('BPMN export plugin not installed');
-                    }
-                },
-                writable: true,
-                configurable: true
-            },
+        const edges = cells.filter(cell => cell.isEdge()).map(edge => ({
+            id: edge.id,
+            source: edge.getSourceCellId(),
+            target: edge.getTargetCellId(),
+            shape: edge.shape,
+            label: String((edge as any).getLabels?.()?.[0]?.attrs?.text?.text || ''),
+            data: (edge as any).getData?.() || {}
+        }));
 
-            toBPMN: {
-                value: async function (this: Graph): Promise<string> {
-                    const bpmnPlugin = this.getPlugin<BpmnExport>('bpmn-export');
-                    if (bpmnPlugin) {
-                        return bpmnPlugin.exportXML();
-                    } else {
-                        throw new Error('BPMN export plugin not installed');
-                    }
-                },
-                writable: true,
-                configurable: true
-            },
+        return { nodes, edges };
+    }
 
-            fromBPMN: {
-                value: async function (this: Graph, xml: string): Promise<void> {
-                    const bpmnPlugin = this.getPlugin<BpmnExport>('bpmn-export');
-                    if (bpmnPlugin) {
-                        await bpmnPlugin.importXML(xml);
-                    } else {
-                        throw new Error('BPMN export plugin not installed');
-                    }
-                },
-                writable: true,
-                configurable: true
-            },
+    /**
+     * Apply graph data to X6 Graph
+     */
+    private applyGraphData(graphData: X6GraphData): void {
+        const { nodes, edges } = graphData;
 
-            validateBPMN: {
-                value: async function (this: Graph): Promise<ValidationResult> {
-                    const bpmnPlugin = this.getPlugin<BpmnExport>('bpmn-export');
-                    if (bpmnPlugin) {
-                        return bpmnPlugin.validate();
-                    } else {
-                        throw new Error('BPMN export plugin not installed');
-                    }
-                },
-                writable: true,
-                configurable: true
-            }
+        // Clear existing cells
+        this.graph.clearCells();
+
+        // Add nodes
+        nodes.forEach((nodeData: any) => {
+            const node = this.graph.createNode({
+                id: nodeData.id,
+                shape: nodeData.shape,
+                x: nodeData.x || 0,
+                y: nodeData.y || 0,
+                width: nodeData.width || 100,
+                height: nodeData.height || 80,
+                label: nodeData.label,
+                data: nodeData.data
+            });
+            this.graph.addNode(node);
+        });
+
+        // Add edges
+        edges.forEach((edgeData: any) => {
+            const edge = this.graph.createEdge({
+                id: edgeData.id,
+                shape: edgeData.shape,
+                source: edgeData.source,
+                target: edgeData.target,
+                label: edgeData.label,
+                data: edgeData.data
+            });
+            this.graph.addEdge(edge);
         });
     }
-}
 
-// Extend Graph interface
-declare module '@antv/x6' {
-    interface Graph {
-        exportBPMN(filename?: string): Promise<void>;
-        toBPMN(): Promise<string>;
-        fromBPMN(xml: string): Promise<void>;
-        validateBPMN(): Promise<ValidationResult>;
+    /**
+     * Setup graph extension methods
+     */
+    private setupGraphMethods(): void {
+        const self = this;
+
+        // Extend Graph prototype with BPMN methods
+        (this.graph as any).exportToBpmn = async function (options?: Partial<BpmnExportOptions>) {
+            return await self.exportToBpmn(options);
+        };
+
+        (this.graph as any).importFromBpmn = async function (xml: string, options?: Partial<BpmnExportOptions>) {
+            return await self.importFromBpmn(xml, options);
+        };
+
+        (this.graph as any).registerBpmnNodeConverter = function (nodeType: string, converter: any) {
+            self.registerNodeConverter(nodeType, converter);
+        };
+
+        (this.graph as any).registerBpmnEdgeConverter = function (edgeType: string, converter: any) {
+            self.registerEdgeConverter(edgeType, converter);
+        };
+
+        (this.graph as any).setBpmnOptions = function (options: Partial<BpmnExportOptions>) {
+            self.setOptions(options);
+        };
     }
 }
 
-// Export all types and utilities
+/**
+ * Static convenience methods
+ */
+export namespace BpmnExport {
+    /**
+     * Create a new BPMN converter instance
+     */
+    export function create(options?: Partial<BpmnExportOptions>): BpmnConverter {
+        return new BpmnConverter(options);
+    }
+
+    /**
+     * Convert X6 graph data to BPMN XML
+     */
+    export async function toBpmn(graphData: X6GraphData, options?: Partial<BpmnExportOptions>): Promise<ConversionResult> {
+        const converter = create(options);
+        return await converter.convertToBpmn(graphData);
+    }
+
+    /**
+     * Convert BPMN XML to X6 graph data  
+     */
+    export async function fromBpmn(xml: string, options?: Partial<BpmnExportOptions>): Promise<ConversionResult> {
+        const converter = create(options);
+        return await converter.convertFromBpmn(xml);
+    }
+}
+
+// Export types and defaults
 export * from './types';
-export * from './converter';
-export * from './validator';
-export * from './mappings';
-export * from './utils';
+export * from './config';
+export { BpmnConverter } from './converter';
 
 // Default export
-export default BpmnExport; 
+export default BpmnExportPlugin; 

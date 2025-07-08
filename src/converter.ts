@@ -1,82 +1,226 @@
 /**
- * BPMN Converter
- * Handles conversion between X6 graph data and BPMN XML
+ * BPMN Converter - 重构版本
+ * 使用bpmn-moddle处理BPMN对象模型，专注于X6数据格式转换
  */
 
-import { Node, Edge } from '@antv/x6';
-import BpmnModeler from 'bpmn-js/lib/Modeler';
+// import BpmnModdle from 'bpmn-moddle';
+// Temporarily use any type until bpmn-moddle is properly installed
+declare const BpmnModdle: any;
 import {
     BpmnExportOptions,
     NodeConverter,
     EdgeConverter,
     X6GraphData,
-    BpmnElement,
-    BpmnSequenceFlow
+    X6NodeData,
+    X6EdgeData,
+    ConversionResult,
+    BpmnElementBounds,
+    BpmnWaypoint
 } from './types';
-import { defaultNodeMappings, reverseMappings, namespaceUris, xmlDeclaration } from './config';
-import { XmlBuilder } from './xml-builder';
-import { generateId, escapeXml } from './utils';
+import { defaultOptions } from './config';
+import { DEFAULT_NODE_MAPPINGS, DEFAULT_BPMN_TO_X6_MAPPINGS } from './mappings';
+import { generateId, sanitizeXMLId } from './utils';
 
 export class BpmnConverter {
     private options: Required<BpmnExportOptions>;
     private nodeConverters: Map<string, NodeConverter>;
     private edgeConverters: Map<string, EdgeConverter>;
-    private bpmnModeler: any;
-    private xmlBuilder: XmlBuilder;
+    private moddle: any;
 
-    constructor(options: Required<BpmnExportOptions>) {
-        this.options = options;
+    constructor(options: Partial<BpmnExportOptions> = {}) {
+        this.options = { ...defaultOptions, ...options };
         this.nodeConverters = new Map();
         this.edgeConverters = new Map();
-        this.xmlBuilder = new XmlBuilder(options);
 
-        // Initialize bpmn-js modeler for parsing
-        this.bpmnModeler = new BpmnModeler({
-            container: document.createElement('div')
-        });
-
-        // Register default converters
-        this.registerDefaultConverters();
+        // 初始化bpmn-moddle实例
+        this.moddle = new BpmnModdle();
     }
 
     /**
      * Convert X6 graph data to BPMN XML
      */
-    async convertToBpmn(graphData: X6GraphData): Promise<string> {
-        const { nodes, edges } = graphData;
+    async convertToBpmn(graphData: X6GraphData): Promise<ConversionResult> {
+        try {
+            // 1. 构建BPMN对象模型
+            const definitions = this.buildBpmnDefinitions(graphData);
 
-        // Build XML structure
-        const xml = this.xmlBuilder.build({
-            processId: this.options.processId,
-            processName: this.options.processName,
-            nodes: nodes.map(node => this.convertNode(node)),
-            edges: edges.map(edge => this.convertEdge(edge)),
-            namespace: this.options.namespace
-        });
+            // 2. 使用bpmn-moddle序列化为XML
+            const { xml } = await this.moddle.toXML(definitions, {
+                format: this.options.format,
+                preamble: true
+            });
 
-        return xml;
+            return {
+                data: xml,
+                warnings: []
+            };
+        } catch (error) {
+            throw new Error(`Failed to convert X6 data to BPMN: ${error}`);
+        }
     }
 
     /**
      * Convert BPMN XML to X6 graph data
      */
-    async convertFromBpmn(xml: string): Promise<X6GraphData> {
-        // Import XML using bpmn-js
-        await this.bpmnModeler.importXML(xml);
+    async convertFromBpmn(xml: string): Promise<ConversionResult> {
+        try {
+            // 1. 使用bpmn-moddle解析XML
+            const { rootElement: definitions, warnings, elementsById } =
+                await this.moddle.fromXML(xml);
 
-        const elementRegistry = this.bpmnModeler.get('elementRegistry');
-        const elements = elementRegistry.getAll();
+            // 2. 从BPMN对象模型提取X6数据
+            const graphData = this.extractX6GraphData(definitions);
 
-        const nodes: Node.Metadata[] = [];
-        const edges: Edge.Metadata[] = [];
+            return {
+                data: graphData,
+                warnings: warnings.map((w: any) => w.message),
+                elementsById
+            };
+        } catch (error) {
+            throw new Error(`Failed to parse BPMN XML: ${error}`);
+        }
+    }
 
-        // Process elements
-        elements.forEach((element: any) => {
-            if (element.type === 'bpmn:SequenceFlow') {
-                const edge = this.convertSequenceFlow(element);
+    /**
+     * Register custom node converter
+     */
+    registerNodeConverter(nodeType: string, converter: NodeConverter): void {
+        this.nodeConverters.set(nodeType, converter);
+    }
+
+    /**
+     * Register custom edge converter
+     */
+    registerEdgeConverter(edgeType: string, converter: EdgeConverter): void {
+        this.edgeConverters.set(edgeType, converter);
+    }
+
+    /**
+     * Update conversion options
+     */
+    setOptions(options: Partial<BpmnExportOptions>): void {
+        this.options = { ...this.options, ...options };
+    }
+
+    /**
+     * Build BPMN definitions from X6 graph data
+     */
+    private buildBpmnDefinitions(graphData: X6GraphData): any {
+        const { nodes, edges } = graphData;
+
+        // 创建根定义
+        const definitions = this.moddle.create('bpmn:Definitions', {
+            id: generateId('Definitions'),
+            targetNamespace: this.options.targetNamespace,
+            exporter: 'X6 BPMN Export Plugin',
+            exporterVersion: '2.0.0'
+        });
+
+        // 创建流程
+        const process = this.moddle.create('bpmn:Process', {
+            id: this.options.processId,
+            name: this.options.processName,
+            isExecutable: true
+        });
+
+        // 转换节点到BPMN元素
+        const bpmnElements = nodes.map(node => this.convertNodeToBpmn(node));
+        const bpmnFlows = edges.map(edge => this.convertEdgeToBpmn(edge));
+
+        // 添加元素到流程
+        process.flowElements = [...bpmnElements, ...bpmnFlows];
+
+        // 添加流程到定义
+        definitions.rootElements = [process];
+
+        // 如果需要，添加图形信息
+        if (this.options.includeDI) {
+            const diagram = this.buildBpmnDiagram(nodes, edges, process.id);
+            definitions.diagrams = [diagram];
+        }
+
+        return definitions;
+    }
+
+    /**
+     * Convert X6 node to BPMN element
+     */
+    private convertNodeToBpmn(node: X6NodeData): any {
+        const { shape, data = {} } = node;
+
+        // 检查自定义转换器
+        if (shape && this.nodeConverters.has(shape)) {
+            return this.nodeConverters.get(shape)!.toBpmn(node, this.moddle);
+        }
+
+        // 使用默认映射
+        const bpmnType = this.getBpmnTypeFromX6Shape(shape || '');
+        const elementId = sanitizeXMLId(node.id);
+
+        // 创建BPMN元素
+        const element = this.moddle.create(bpmnType, {
+            id: elementId,
+            name: data.name || node.label || ''
+        });
+
+        // 添加引擎特定属性
+        this.addEngineSpecificAttributes(element, data);
+
+        return element;
+    }
+
+    /**
+     * Convert X6 edge to BPMN sequence flow
+     */
+    private convertEdgeToBpmn(edge: X6EdgeData): any {
+        const { data = {} } = edge;
+
+        // 检查自定义转换器
+        if (edge.shape && this.edgeConverters.has(edge.shape)) {
+            return this.edgeConverters.get(edge.shape)!.toBpmn(edge, this.moddle);
+        }
+
+        // 创建序列流
+        const sequenceFlow = this.moddle.create('bpmn:SequenceFlow', {
+            id: sanitizeXMLId(edge.id),
+            name: data.name || edge.label || '',
+            sourceRef: edge.source,
+            targetRef: edge.target
+        });
+
+        // 添加条件表达式
+        if (data.conditionExpression) {
+            sequenceFlow.conditionExpression = this.moddle.create('bpmn:FormalExpression', {
+                body: data.conditionExpression
+            });
+        }
+
+        return sequenceFlow;
+    }
+
+    /**
+     * Extract X6 graph data from BPMN definitions
+     */
+    private extractX6GraphData(definitions: any): X6GraphData {
+        const nodes: X6NodeData[] = [];
+        const edges: X6EdgeData[] = [];
+
+        // 获取第一个流程
+        const process = definitions.rootElements?.find((el: any) => el.$type === 'bpmn:Process');
+        if (!process) {
+            return { nodes, edges };
+        }
+
+        // 获取图形信息映射
+        const diMap = this.buildDiagramElementMap(definitions);
+
+        // 处理流程元素
+        process.flowElements?.forEach((element: any) => {
+            if (element.$type === 'bpmn:SequenceFlow') {
+                const edge = this.convertBpmnToEdge(element, diMap);
                 if (edge) edges.push(edge);
-            } else if (!this.isInternalType(element)) {
-                const node = this.convertBpmnElement(element);
+            } else {
+                const node = this.convertBpmnToNode(element, diMap);
                 if (node) nodes.push(node);
             }
         });
@@ -85,111 +229,43 @@ export class BpmnConverter {
     }
 
     /**
-     * Register node converter
-     */
-    registerNodeConverter(nodeType: string, converter: NodeConverter): void {
-        this.nodeConverters.set(nodeType, converter);
-    }
-
-    /**
-     * Register edge converter
-     */
-    registerEdgeConverter(edgeType: string, converter: EdgeConverter): void {
-        this.edgeConverters.set(edgeType, converter);
-    }
-
-    /**
-     * Set options
-     */
-    setOptions(options: Required<BpmnExportOptions>): void {
-        this.options = options;
-        this.xmlBuilder.setOptions(options);
-    }
-
-    /**
-     * Convert X6 node to BPMN element
-     */
-    private convertNode(node: Node.Metadata): BpmnElement {
-        const { shape, data = {} } = node;
-
-        // Check for custom converter
-        if (this.nodeConverters.has(shape)) {
-            return this.nodeConverters.get(shape)!.toBpmn(node as Node);
-        }
-
-        // Use default mapping
-        const bpmnType = this.getBpmnType(shape);
-        const element: BpmnElement = {
-            type: bpmnType,
-            id: node.id || generateId(bpmnType),
-            name: data.name
-        };
-
-        // Handle attributes
-        element.attributes = this.extractNodeAttributes(node, bpmnType);
-
-        // Handle extension elements
-        element.extensionElements = this.extractExtensionElements(data);
-
-        return element;
-    }
-
-    /**
-     * Convert X6 edge to BPMN sequence flow
-     */
-    private convertEdge(edge: Edge.Metadata): BpmnSequenceFlow {
-        const { shape = 'edge', data = {} } = edge;
-
-        // Check for custom converter
-        if (this.edgeConverters.has(shape)) {
-            return this.edgeConverters.get(shape)!.toBpmn(edge as Edge);
-        }
-
-        // Default conversion
-        const flow: BpmnSequenceFlow = {
-            id: edge.id || generateId('SequenceFlow'),
-            name: data.name,
-            sourceRef: this.getNodeRef(edge.source),
-            targetRef: this.getNodeRef(edge.target),
-            conditionExpression: data.conditionExpression
-        };
-
-        // Handle attributes
-        flow.attributes = this.extractEdgeAttributes(edge);
-
-        // Handle extension elements
-        flow.extensionElements = this.extractExtensionElements(data);
-
-        return flow;
-    }
-
-    /**
      * Convert BPMN element to X6 node
      */
-    private convertBpmnElement(element: any): Node.Metadata | null {
-        const bpmnType = element.type.replace('bpmn:', '');
-        const x6Shape = reverseMappings[bpmnType] || `bpmn-${bpmnType.toLowerCase()}`;
+    private convertBpmnToNode(element: any, diMap: Map<string, any>): X6NodeData | null {
+        const bpmnType = element.$type.replace('bpmn:', '');
+        const x6Shape = this.getX6ShapeFromBpmnType(bpmnType);
 
-        // Check for custom converter
+        // 获取图形信息
+        const diElement = diMap.get(element.id);
+        const bounds = diElement?.bounds || { x: 0, y: 0, width: 100, height: 80 };
+
+        // 检查自定义转换器
         if (this.nodeConverters.has(x6Shape)) {
             const converter = this.nodeConverters.get(x6Shape)!;
-            return converter.fromBpmn(this.extractBpmnElement(element));
+            const converted = converter.fromBpmn(element, this.moddle);
+            return {
+                id: element.id,
+                shape: x6Shape,
+                x: bounds.x,
+                y: bounds.y,
+                width: bounds.width,
+                height: bounds.height,
+                ...converted
+            };
         }
 
-        // Default conversion
-        const node: Node.Metadata = {
+        // 默认转换
+        const node: X6NodeData = {
             id: element.id,
             shape: x6Shape,
-            x: element.x || 0,
-            y: element.y || 0,
-            width: element.width,
-            height: element.height,
+            x: bounds.x,
+            y: bounds.y,
+            width: bounds.width,
+            height: bounds.height,
             data: {
-                name: element.businessObject?.name,
-                bpmn: {
-                    type: element.type,
-                    businessObject: this.extractBusinessObject(element.businessObject)
-                }
+                name: element.name,
+                // 提取引擎特定属性
+                ...this.extractEngineSpecificData(element)
             }
         };
 
@@ -199,184 +275,192 @@ export class BpmnConverter {
     /**
      * Convert BPMN sequence flow to X6 edge
      */
-    private convertSequenceFlow(element: any): Edge.Metadata | null {
-        const businessObject = element.businessObject;
-
-        const edge: Edge.Metadata = {
-            id: element.id,
+    private convertBpmnToEdge(sequenceFlow: any, diMap: Map<string, any>): X6EdgeData | null {
+        const edge: X6EdgeData = {
+            id: sequenceFlow.id,
+            source: sequenceFlow.sourceRef,
+            target: sequenceFlow.targetRef,
             shape: 'edge',
-            source: businessObject.sourceRef?.id,
-            target: businessObject.targetRef?.id,
             data: {
-                name: businessObject.name,
-                conditionExpression: businessObject.conditionExpression?.body,
-                bpmn: {
-                    type: element.type,
-                    businessObject: this.extractBusinessObject(businessObject)
-                }
+                name: sequenceFlow.name
             }
         };
 
-        // Handle waypoints for edge routing
-        if (element.waypoints) {
-            edge.vertices = element.waypoints.map((point: any) => ({
-                x: point.x,
-                y: point.y
-            }));
+        // 添加条件表达式
+        if (sequenceFlow.conditionExpression) {
+            edge.data!.conditionExpression = sequenceFlow.conditionExpression.body;
         }
 
         return edge;
     }
 
     /**
-     * Register default converters
+     * Build BPMN diagram information
      */
-    private registerDefaultConverters(): void {
-        // Add any built-in custom converters here
+    private buildBpmnDiagram(nodes: X6NodeData[], edges: X6EdgeData[], processId: string): any {
+        const diagram = this.moddle.create('bpmndi:BPMNDiagram', {
+            id: generateId('BPMNDiagram')
+        });
+
+        const plane = this.moddle.create('bpmndi:BPMNPlane', {
+            id: generateId('BPMNPlane'),
+            bpmnElement: processId
+        });
+
+        // 创建节点图形信息
+        const shapes = nodes.map(node => {
+            const shape = this.moddle.create('bpmndi:BPMNShape', {
+                id: generateId('BPMNShape'),
+                bpmnElement: node.id
+            });
+
+            shape.bounds = this.moddle.create('dc:Bounds', {
+                x: node.x || 0,
+                y: node.y || 0,
+                width: node.width || 100,
+                height: node.height || 80
+            });
+
+            return shape;
+        });
+
+        // 创建边图形信息
+        const edgeShapes = edges.map(edge => {
+            const sourceNode = nodes.find(n => n.id === edge.source);
+            const targetNode = nodes.find(n => n.id === edge.target);
+
+            const edgeShape = this.moddle.create('bpmndi:BPMNEdge', {
+                id: generateId('BPMNEdge'),
+                bpmnElement: edge.id
+            });
+
+            // 生成路径点
+            if (sourceNode && targetNode) {
+                const waypoints = this.generateWaypoints(sourceNode, targetNode);
+                edgeShape.waypoint = waypoints.map(wp =>
+                    this.moddle.create('di:waypoint', wp)
+                );
+            }
+
+            return edgeShape;
+        });
+
+        plane.planeElement = [...shapes, ...edgeShapes];
+        diagram.plane = plane;
+
+        return diagram;
+    }
+
+    /**
+     * Build diagram element map for position information
+     */
+    private buildDiagramElementMap(definitions: any): Map<string, any> {
+        const diMap = new Map();
+
+        const diagram = definitions.diagrams?.[0];
+        if (!diagram?.plane?.planeElement) {
+            return diMap;
+        }
+
+        diagram.plane.planeElement.forEach((element: any) => {
+            if (element.bpmnElement) {
+                diMap.set(element.bpmnElement, {
+                    bounds: element.bounds ? {
+                        x: element.bounds.x,
+                        y: element.bounds.y,
+                        width: element.bounds.width,
+                        height: element.bounds.height
+                    } : null,
+                    waypoints: element.waypoint?.map((wp: any) => ({
+                        x: wp.x,
+                        y: wp.y
+                    })) || []
+                });
+            }
+        });
+
+        return diMap;
+    }
+
+    /**
+     * Generate waypoints for sequence flow
+     */
+    private generateWaypoints(source: X6NodeData, target: X6NodeData): BpmnWaypoint[] {
+        const sourceX = (source.x || 0) + (source.width || 100) / 2;
+        const sourceY = (source.y || 0) + (source.height || 80) / 2;
+        const targetX = (target.x || 0) + (target.width || 100) / 2;
+        const targetY = (target.y || 0) + (target.height || 80) / 2;
+
+        return [
+            { x: sourceX, y: sourceY },
+            { x: targetX, y: targetY }
+        ];
     }
 
     /**
      * Get BPMN type from X6 shape
      */
-    private getBpmnType(shape: string): string {
-        const customMapping = this.options.customMappings[shape];
+    private getBpmnTypeFromX6Shape(shape: string): string {
+        const customMapping = this.options.nodeTypeMappings[shape];
         if (customMapping) return customMapping;
 
-        return defaultNodeMappings[shape] || 'task';
+        return DEFAULT_NODE_MAPPINGS[shape] || 'bpmn:Task';
     }
 
     /**
-     * Extract node attributes
+     * Get X6 shape from BPMN type
      */
-    private extractNodeAttributes(node: Node.Metadata, bpmnType: string): Record<string, any> {
-        const { data = {} } = node;
-        const attributes: Record<string, any> = {};
+    private getX6ShapeFromBpmnType(bpmnType: string): string {
+        return DEFAULT_BPMN_TO_X6_MAPPINGS[bpmnType] || `bpmn-${bpmnType.toLowerCase()}`;
+    }
 
-        // Handle specific node types
-        switch (bpmnType) {
-            case 'serviceTask':
-                if (data.flowable?.class) attributes['flowable:class'] = data.flowable.class;
-                if (data.flowable?.delegateExpression) {
-                    attributes['flowable:delegateExpression'] = `\${${data.flowable.delegateExpression}}`;
+    /**
+     * Add engine-specific attributes to BPMN element
+     */
+    private addEngineSpecificAttributes(element: any, data: any): void {
+        const namespace = this.options.namespace;
+
+        if (namespace === 'flowable' && data.flowable) {
+            Object.keys(data.flowable).forEach(key => {
+                if (data.flowable[key] !== undefined) {
+                    element[`flowable:${key}`] = data.flowable[key];
                 }
-                if (data.flowable?.expression) attributes['flowable:expression'] = data.flowable.expression;
-                if (data.flowable?.resultVariable) attributes['flowable:resultVariable'] = data.flowable.resultVariable;
-                break;
+            });
+        }
 
-            case 'scriptTask':
-                if (data.scriptFormat) attributes.scriptFormat = data.scriptFormat;
-                if (data.flowable?.autoStoreVariables) {
-                    attributes['flowable:autoStoreVariables'] = String(data.flowable.autoStoreVariables);
+        if (namespace === 'camunda' && data.camunda) {
+            Object.keys(data.camunda).forEach(key => {
+                if (data.camunda[key] !== undefined) {
+                    element[`camunda:${key}`] = data.camunda[key];
                 }
-                break;
+            });
+        }
 
-            case 'callActivity':
-                if (data.calledElement) attributes.calledElement = data.calledElement;
-                if (data.flowable?.inheritVariables) {
-                    attributes['flowable:inheritVariables'] = String(data.flowable.inheritVariables);
+        if (namespace === 'activiti' && data.activiti) {
+            Object.keys(data.activiti).forEach(key => {
+                if (data.activiti[key] !== undefined) {
+                    element[`activiti:${key}`] = data.activiti[key];
                 }
-                break;
+            });
         }
-
-        // Handle async attributes
-        if (data.flowable?.async) {
-            attributes['flowable:async'] = 'true';
-            attributes['flowable:exclusive'] = data.flowable.exclusive === false ? 'false' : 'true';
-        }
-
-        return attributes;
     }
 
     /**
-     * Extract edge attributes
+     * Extract engine-specific data from BPMN element
      */
-    private extractEdgeAttributes(edge: Edge.Metadata): Record<string, any> {
-        const { data = {} } = edge;
-        const attributes: Record<string, any> = {};
+    private extractEngineSpecificData(element: any): any {
+        const data: any = {};
+        const namespace = this.options.namespace;
 
-        // Add any edge-specific attributes here
-
-        return attributes;
-    }
-
-    /**
-     * Extract extension elements
-     */
-    private extractExtensionElements(data: any): Record<string, any> {
-        const extensions: Record<string, any> = {};
-
-        // Handle execution listeners
-        if (data.executionListeners) {
-            extensions[`${this.options.namespace}:executionListener`] = data.executionListeners;
-        }
-
-        // Handle field injections
-        if (data.fields) {
-            extensions[`${this.options.namespace}:field`] = data.fields;
-        }
-
-        // Handle form properties
-        if (data.formProperties) {
-            extensions[`${this.options.namespace}:formProperty`] = data.formProperties;
-        }
-
-        return extensions;
-    }
-
-    /**
-     * Extract business object
-     */
-    private extractBusinessObject(businessObject: any): any {
-        if (!businessObject) return {};
-
-        const extracted: Record<string, any> = {};
-
-        // Extract basic properties
-        for (const key of Object.keys(businessObject)) {
-            if (!key.startsWith('$') && !['di', 'incoming', 'outgoing'].includes(key)) {
-                extracted[key] = businessObject[key];
+        // 提取所有属性
+        Object.keys(element).forEach(key => {
+            if (key.startsWith(`${namespace}:`)) {
+                if (!data[namespace]) data[namespace] = {};
+                const propName = key.substring(namespace.length + 1);
+                data[namespace][propName] = element[key];
             }
-        }
+        });
 
-        // Extract namespace attributes
-        if (businessObject.$attrs) {
-            extracted.attrs = businessObject.$attrs;
-        }
-
-        return extracted;
-    }
-
-    /**
-     * Extract BPMN element for converter
-     */
-    private extractBpmnElement(element: any): BpmnElement {
-        return {
-            type: element.type.replace('bpmn:', ''),
-            id: element.id,
-            name: element.businessObject?.name,
-            attributes: element.businessObject?.$attrs || {},
-            extensionElements: element.businessObject?.extensionElements?.values || []
-        };
-    }
-
-    /**
-     * Get node reference from edge source/target
-     */
-    private getNodeRef(ref: any): string {
-        if (typeof ref === 'string') return ref;
-        if (ref?.cell) return ref.cell;
-        if (ref?.id) return ref.id;
-        return '';
-    }
-
-    /**
-     * Check if element is internal type
-     */
-    private isInternalType(element: any): boolean {
-        const internalTypes = ['label', 'connection', 'root', 'bpmn:Process'];
-        return internalTypes.some(type =>
-            element.type?.includes(type) ||
-            element.constructor?.name?.includes('Root')
-        );
+        return data;
     }
 } 

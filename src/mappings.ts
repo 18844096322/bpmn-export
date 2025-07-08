@@ -1,282 +1,99 @@
 /**
- * Node and Edge mappings for BPMN export
+ * Node and Edge type mappings for BPMN conversion
  */
-
-import { NodeConverter, EdgeConverter } from './types';
-import { generateId, parseConditionExpression } from './utils';
 
 /**
- * Default node converters
+ * X6 shape to BPMN element type mappings
  */
-export const defaultNodeConverters: Record<string, NodeConverter> = {
-    'bpmn-service-task': {
-        toBpmn: (node) => ({
-            type: 'serviceTask',
-            id: node.id || generateId('ServiceTask'),
-            name: node.getData()?.name,
-            attributes: {
-                ...extractFlowableAttributes(node.getData()?.flowable, 'service')
-            },
-            extensionElements: extractExtensionElements(node.getData())
-        }),
-        fromBpmn: (element) => ({
-            shape: 'bpmn-service-task',
-            data: {
-                name: element.name,
-                flowable: parseFlowableAttributes(element.attributes)
-            }
-        })
-    },
+export const DEFAULT_NODE_MAPPINGS: Record<string, string> = {
+    // Start Events
+    'bpmn-start-event': 'bpmn:StartEvent',
+    'bpmn-start-message-event': 'bpmn:StartEvent',
+    'bpmn-start-timer-event': 'bpmn:StartEvent',
+    'bpmn-start-signal-event': 'bpmn:StartEvent',
 
-    'bpmn-script-task': {
-        toBpmn: (node) => ({
-            type: 'scriptTask',
-            id: node.id || generateId('ScriptTask'),
-            name: node.getData()?.name,
-            attributes: {
-                scriptFormat: node.getData()?.scriptFormat || 'javascript',
-                ...extractFlowableAttributes(node.getData()?.flowable, 'script')
-            },
-            extensionElements: extractExtensionElements(node.getData())
-        }),
-        fromBpmn: (element) => ({
-            shape: 'bpmn-script-task',
-            data: {
-                name: element.name,
-                scriptFormat: element.attributes?.scriptFormat,
-                flowable: parseFlowableAttributes(element.attributes)
-            }
-        })
-    },
+    // End Events
+    'bpmn-end-event': 'bpmn:EndEvent',
+    'bpmn-end-message-event': 'bpmn:EndEvent',
+    'bpmn-end-error-event': 'bpmn:EndEvent',
+    'bpmn-end-terminate-event': 'bpmn:EndEvent',
 
-    'bpmn-user-task': {
-        toBpmn: (node) => ({
-            type: 'userTask',
-            id: node.id || generateId('UserTask'),
-            name: node.getData()?.name,
-            attributes: {
-                ...extractUserTaskAttributes(node.getData()),
-                ...extractFlowableAttributes(node.getData()?.flowable, 'user')
-            },
-            extensionElements: extractExtensionElements(node.getData())
-        }),
-        fromBpmn: (element) => ({
-            shape: 'bpmn-user-task',
-            data: {
-                name: element.name,
-                ...parseUserTaskAttributes(element.attributes),
-                flowable: parseFlowableAttributes(element.attributes)
-            }
-        })
-    },
+    // Intermediate Events
+    'bpmn-intermediate-event': 'bpmn:IntermediateCatchEvent',
+    'bpmn-intermediate-throw-event': 'bpmn:IntermediateThrowEvent',
+    'bpmn-boundary-event': 'bpmn:BoundaryEvent',
 
-    'bpmn-exclusive-gateway': {
-        toBpmn: (node) => ({
-            type: 'exclusiveGateway',
-            id: node.id || generateId('ExclusiveGateway'),
-            name: node.getData()?.name,
-            attributes: {
-                default: node.getData()?.default
-            },
-            extensionElements: extractExtensionElements(node.getData())
-        }),
-        fromBpmn: (element) => ({
-            shape: 'bpmn-exclusive-gateway',
-            data: {
-                name: element.name,
-                default: element.attributes?.default
-            }
-        })
-    }
+    // Tasks
+    'bpmn-task': 'bpmn:Task',
+    'bpmn-user-task': 'bpmn:UserTask',
+    'bpmn-service-task': 'bpmn:ServiceTask',
+    'bpmn-script-task': 'bpmn:ScriptTask',
+    'bpmn-send-task': 'bpmn:SendTask',
+    'bpmn-receive-task': 'bpmn:ReceiveTask',
+    'bpmn-manual-task': 'bpmn:ManualTask',
+    'bpmn-business-rule-task': 'bpmn:BusinessRuleTask',
+    'bpmn-call-activity': 'bpmn:CallActivity',
+
+    // Gateways
+    'bpmn-exclusive-gateway': 'bpmn:ExclusiveGateway',
+    'bpmn-inclusive-gateway': 'bpmn:InclusiveGateway',
+    'bpmn-parallel-gateway': 'bpmn:ParallelGateway',
+    'bpmn-event-based-gateway': 'bpmn:EventBasedGateway',
+
+    // Sub Processes
+    'bpmn-subprocess': 'bpmn:SubProcess',
+
+    // Data Objects
+    'bpmn-data-object': 'bpmn:DataObject',
+    'bpmn-data-store': 'bpmn:DataStoreReference'
 };
 
 /**
- * Default edge converters
+ * BPMN element type to X6 shape mappings
  */
-export const defaultEdgeConverters: Record<string, EdgeConverter> = {
-    'edge': {
-        toBpmn: (edge) => ({
-            id: edge.id || generateId('SequenceFlow'),
-            name: edge.getData()?.name,
-            sourceRef: getEdgeRef(edge.getSourceCell()),
-            targetRef: getEdgeRef(edge.getTargetCell()),
-            conditionExpression: edge.getData()?.conditionExpression ?
-                parseConditionExpression(edge.getData().conditionExpression) : undefined,
-            extensionElements: extractExtensionElements(edge.getData())
-        }),
-        fromBpmn: (flow) => ({
-            shape: 'edge',
-            source: flow.sourceRef,
-            target: flow.targetRef,
-            data: {
-                name: flow.name,
-                conditionExpression: flow.conditionExpression
-            }
-        })
-    }
+export const DEFAULT_BPMN_TO_X6_MAPPINGS: Record<string, string> = {
+    // Start Events
+    'StartEvent': 'bpmn-start-event',
+
+    // End Events
+    'EndEvent': 'bpmn-end-event',
+
+    // Intermediate Events
+    'IntermediateCatchEvent': 'bpmn-intermediate-event',
+    'IntermediateThrowEvent': 'bpmn-intermediate-throw-event',
+    'BoundaryEvent': 'bpmn-boundary-event',
+
+    // Tasks
+    'Task': 'bpmn-task',
+    'UserTask': 'bpmn-user-task',
+    'ServiceTask': 'bpmn-service-task',
+    'ScriptTask': 'bpmn-script-task',
+    'SendTask': 'bpmn-send-task',
+    'ReceiveTask': 'bpmn-receive-task',
+    'ManualTask': 'bpmn-manual-task',
+    'BusinessRuleTask': 'bpmn-business-rule-task',
+    'CallActivity': 'bpmn-call-activity',
+
+    // Gateways
+    'ExclusiveGateway': 'bpmn-exclusive-gateway',
+    'InclusiveGateway': 'bpmn-inclusive-gateway',
+    'ParallelGateway': 'bpmn-parallel-gateway',
+    'EventBasedGateway': 'bpmn-event-based-gateway',
+
+    // Sub Processes
+    'SubProcess': 'bpmn-subprocess',
+
+    // Data Objects
+    'DataObject': 'bpmn-data-object',
+    'DataStoreReference': 'bpmn-data-store'
 };
 
 /**
- * Extract Flowable attributes
+ * Default edge mappings
  */
-function extractFlowableAttributes(flowable: any, taskType: string): Record<string, string> {
-    if (!flowable) return {};
-
-    const attrs: Record<string, string> = {};
-
-    // Common attributes
-    if (flowable.async) {
-        attrs['flowable:async'] = 'true';
-        attrs['flowable:exclusive'] = flowable.exclusive === false ? 'false' : 'true';
-    }
-
-    // Service task attributes
-    if (taskType === 'service') {
-        if (flowable.class) attrs['flowable:class'] = flowable.class;
-        if (flowable.delegateExpression) {
-            attrs['flowable:delegateExpression'] = `\${${flowable.delegateExpression.replace(/^\${|}$/g, '')}}`;
-        }
-        if (flowable.expression) attrs['flowable:expression'] = flowable.expression;
-        if (flowable.resultVariable) attrs['flowable:resultVariable'] = flowable.resultVariable;
-        if (flowable.useLocalScopeForResultVariable) {
-            attrs['flowable:useLocalScopeForResultVariable'] = 'true';
-        }
-    }
-
-    // Script task attributes
-    if (taskType === 'script' && flowable.autoStoreVariables) {
-        attrs['flowable:autoStoreVariables'] = 'true';
-    }
-
-    // User task attributes
-    if (taskType === 'user') {
-        if (flowable.formKey) attrs['flowable:formKey'] = flowable.formKey;
-        if (flowable.formFieldValidation) attrs['flowable:formFieldValidation'] = flowable.formFieldValidation;
-        if (flowable.assignee) attrs['flowable:assignee'] = flowable.assignee;
-        if (flowable.candidateUsers) attrs['flowable:candidateUsers'] = flowable.candidateUsers;
-        if (flowable.candidateGroups) attrs['flowable:candidateGroups'] = flowable.candidateGroups;
-        if (flowable.dueDate) attrs['flowable:dueDate'] = flowable.dueDate;
-        if (flowable.priority) attrs['flowable:priority'] = String(flowable.priority);
-    }
-
-    return attrs;
-}
-
-/**
- * Parse Flowable attributes
- */
-function parseFlowableAttributes(attributes: any): any {
-    if (!attributes) return {};
-
-    const flowable: any = {};
-
-    for (const [key, value] of Object.entries(attributes)) {
-        if (key.startsWith('flowable:')) {
-            const attrName = key.replace('flowable:', '');
-
-            switch (attrName) {
-                case 'async':
-                    flowable.async = value === 'true';
-                    break;
-                case 'exclusive':
-                    flowable.exclusive = value === 'true';
-                    break;
-                case 'delegateExpression':
-                    flowable.delegateExpression = String(value).replace(/^\${|}$/g, '');
-                    break;
-                case 'autoStoreVariables':
-                    flowable.autoStoreVariables = value === 'true';
-                    break;
-                case 'useLocalScopeForResultVariable':
-                    flowable.useLocalScopeForResultVariable = value === 'true';
-                    break;
-                default:
-                    flowable[attrName] = value;
-            }
-        }
-    }
-
-    return flowable;
-}
-
-/**
- * Extract user task attributes
- */
-function extractUserTaskAttributes(data: any): Record<string, string> {
-    const attrs: Record<string, string> = {};
-
-    if (data?.formKey) attrs.formKey = data.formKey;
-    if (data?.assignee) attrs.assignee = data.assignee;
-    if (data?.candidateUsers) attrs.candidateUsers = data.candidateUsers;
-    if (data?.candidateGroups) attrs.candidateGroups = data.candidateGroups;
-    if (data?.dueDate) attrs.dueDate = data.dueDate;
-    if (data?.priority) attrs.priority = String(data.priority);
-
-    return attrs;
-}
-
-/**
- * Parse user task attributes
- */
-function parseUserTaskAttributes(attributes: any): any {
-    const parsed: any = {};
-
-    if (attributes?.formKey) parsed.formKey = attributes.formKey;
-    if (attributes?.assignee) parsed.assignee = attributes.assignee;
-    if (attributes?.candidateUsers) parsed.candidateUsers = attributes.candidateUsers;
-    if (attributes?.candidateGroups) parsed.candidateGroups = attributes.candidateGroups;
-    if (attributes?.dueDate) parsed.dueDate = attributes.dueDate;
-    if (attributes?.priority) parsed.priority = parseInt(attributes.priority);
-
-    return parsed;
-}
-
-/**
- * Extract extension elements
- */
-function extractExtensionElements(data: any): Record<string, any> {
-    const extensions: Record<string, any> = {};
-
-    // Execution listeners
-    if (data?.executionListeners && data.executionListeners.length > 0) {
-        extensions['flowable:executionListener'] = data.executionListeners.map((listener: any) => ({
-            event: listener.event,
-            class: listener.class,
-            expression: listener.expression,
-            delegateExpression: listener.delegateExpression
-        }));
-    }
-
-    // Field injections
-    if (data?.fields && data.fields.length > 0) {
-        extensions['flowable:field'] = data.fields.map((field: any) => ({
-            name: field.name,
-            string: field.string ? { $body: field.string } : undefined,
-            expression: field.expression ? { $body: field.expression } : undefined
-        }));
-    }
-
-    // Form properties
-    if (data?.formProperties && data.formProperties.length > 0) {
-        extensions['flowable:formProperty'] = data.formProperties.map((prop: any) => ({
-            id: prop.id,
-            name: prop.name,
-            type: prop.type,
-            expression: prop.expression,
-            variable: prop.variable,
-            default: prop.default,
-            required: prop.required
-        }));
-    }
-
-    return extensions;
-}
-
-/**
- * Get edge reference
- */
-function getEdgeRef(cell: any): string {
-    if (!cell) return '';
-    if (typeof cell === 'string') return cell;
-    return cell.id || '';
-} 
+export const DEFAULT_EDGE_MAPPINGS: Record<string, string> = {
+    'edge': 'sequenceFlow',
+    'bpmn-sequence-flow': 'sequenceFlow',
+    'bpmn-message-flow': 'messageFlow',
+    'bpmn-association': 'association'
+}; 
