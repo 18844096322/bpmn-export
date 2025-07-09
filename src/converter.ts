@@ -2,7 +2,7 @@
  * BPMN Converter - 重构版本
  * 使用bpmn-moddle处理BPMN对象模型，专注于X6数据格式转换
  */
-
+// @ts-ignore
 import BpmnModdle from 'bpmn-moddle';
 import {
     BpmnExportOptions,
@@ -30,8 +30,11 @@ export class BpmnConverter {
         this.nodeConverters = new Map();
         this.edgeConverters = new Map();
 
-        // 初始化bpmn-moddle实例
-        this.moddle = new BpmnModdle();
+        // 初始化bpmn-moddle实例，配置命名空间
+        this.moddle = new BpmnModdle({}, {
+            // 设置默认命名空间为BPMN，这样元素就不会有bpmn:前缀
+            defaultNs: 'bpmn'
+        });
     }
 
     /**
@@ -41,6 +44,7 @@ export class BpmnConverter {
         try {
             // 1. 构建BPMN对象模型
             const definitions = this.buildBpmnDefinitions(graphData);
+            console.log('definitions', definitions);
 
             // 2. 验证BPMN定义
             const validationWarnings = this.validateBpmnDefinitions(definitions);
@@ -48,7 +52,9 @@ export class BpmnConverter {
             // 3. 使用bpmn-moddle序列化为XML
             const { xml } = await this.moddle.toXML(definitions, {
                 format: this.options.format,
-                preamble: true
+                preamble: true,
+                // 配置命名空间前缀
+                defaultNs: 'http://www.omg.org/spec/BPMN/20100524/MODEL'
             });
 
             return {
@@ -119,8 +125,13 @@ export class BpmnConverter {
         const definitions = this.moddle.create('bpmn:Definitions', {
             id: generateId('Definitions'),
             targetNamespace: this.options.targetNamespace,
-            exporter: 'X6 BPMN Export Plugin',
-            exporterVersion: '2.0.0'
+            // exporter: 'X6 BPMN Export Plugin',
+            // exporterVersion: '2.0.0',
+            // 设置默认命名空间，这样BPMN元素就不会有前缀
+            'xmlns': 'http://www.omg.org/spec/BPMN/20100524/MODEL',
+            'xmlns:bpmndi': 'http://www.omg.org/spec/BPMN/20100524/DI',
+            'xmlns:dc': 'http://www.omg.org/spec/DD/20100524/DC',
+            'xmlns:di': 'http://www.omg.org/spec/DD/20100524/DI'
         });
 
         // 创建流程
@@ -139,7 +150,7 @@ export class BpmnConverter {
 
         // 添加流程到定义
         definitions.rootElements = [process];
-
+        console.log('definitions', definitions);
         // 如果需要，添加图形信息
         if (this.options.includeDI) {
             const diagram = this.buildBpmnDiagram(nodes, edges, process.id);
@@ -191,9 +202,10 @@ export class BpmnConverter {
         const sequenceFlow = this.moddle.create('bpmn:SequenceFlow', {
             id: sanitizeXMLId(edge.id),
             name: data.name || edge.label || '',
-            sourceRef: edge.source,
-            targetRef: edge.target
+            sourceRef: { id: edge.source },
+            targetRef: { id: edge.target }
         });
+        console.log('sequenceFlow', edge.source, edge.target);
 
         // 添加条件表达式
         if (data.conditionExpression) {
@@ -231,6 +243,7 @@ export class BpmnConverter {
                 if (node) nodes.push(node);
             }
         });
+        console.log('edges', edges);
 
         return { nodes, edges };
     }
@@ -244,6 +257,7 @@ export class BpmnConverter {
 
         // 获取图形信息
         const diElement = diMap.get(element.id);
+        console.log('element', element);
         const bounds = diElement?.bounds || { x: 0, y: 0, width: 100, height: 80 };
 
         // 检查自定义转换器
@@ -273,7 +287,8 @@ export class BpmnConverter {
                 name: element.name,
                 // 提取引擎特定属性
                 ...this.extractEngineSpecificData(element)
-            }
+            },
+            label: element.name
         };
 
         return node;
@@ -285,12 +300,13 @@ export class BpmnConverter {
     private convertBpmnToEdge(sequenceFlow: any, diMap: Map<string, any>): X6EdgeData | null {
         const edge: X6EdgeData = {
             id: sequenceFlow.id,
-            source: sequenceFlow.sourceRef,
-            target: sequenceFlow.targetRef,
+            source: sequenceFlow.sourceRef.id,
+            target: sequenceFlow.targetRef.id,
             shape: 'edge',
             data: {
                 name: sequenceFlow.name
-            }
+            },
+            label: sequenceFlow.name
         };
 
         // 添加条件表达式
@@ -311,14 +327,14 @@ export class BpmnConverter {
 
         const plane = this.moddle.create('bpmndi:BPMNPlane', {
             id: generateId('BPMNPlane'),
-            bpmnElement: processId
+            bpmnElement: { id: processId }
         });
 
         // 创建节点图形信息
         const shapes = nodes.map(node => {
             const shape = this.moddle.create('bpmndi:BPMNShape', {
                 id: generateId('BPMNShape'),
-                bpmnElement: node.id
+                bpmnElement: { id: node.id }
             });
 
             shape.bounds = this.moddle.create('dc:Bounds', {
@@ -338,14 +354,15 @@ export class BpmnConverter {
 
             const edgeShape = this.moddle.create('bpmndi:BPMNEdge', {
                 id: generateId('BPMNEdge'),
-                bpmnElement: edge.id
+                bpmnElement: { id: edge.id }
             });
 
             // 生成路径点
             if (sourceNode && targetNode) {
                 const waypoints = this.generateWaypoints(sourceNode, targetNode);
                 edgeShape.waypoint = waypoints.map(wp =>
-                    this.moddle.create('di:waypoint', wp)
+                    // this.moddle.create('di:waypoint', wp)
+                    this.moddle.create('dc:Point', wp)
                 );
             }
 
@@ -371,7 +388,7 @@ export class BpmnConverter {
 
         diagram.plane.planeElement.forEach((element: any) => {
             if (element.bpmnElement) {
-                diMap.set(element.bpmnElement, {
+                diMap.set(element.bpmnElement.id, {
                     bounds: element.bounds ? {
                         x: element.bounds.x,
                         y: element.bounds.y,
@@ -505,7 +522,7 @@ export class BpmnConverter {
         const flowElements = process.flowElements || [];
 
         // 检查开始事件
-        const startEvents = flowElements.filter((el: any) => 
+        const startEvents = flowElements.filter((el: any) =>
             el.$type === 'bpmn:StartEvent'
         );
         if (startEvents.length === 0) {
@@ -513,7 +530,7 @@ export class BpmnConverter {
         }
 
         // 检查结束事件
-        const endEvents = flowElements.filter((el: any) => 
+        const endEvents = flowElements.filter((el: any) =>
             el.$type === 'bpmn:EndEvent'
         );
         if (endEvents.length === 0) {

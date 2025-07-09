@@ -6,18 +6,30 @@
 import { Graph } from '@antv/x6';
 import { BpmnConverter } from './converter';
 import { BpmnExportOptions, X6GraphData, ConversionResult } from './types';
-import { defaultOptions } from './config';
+import { registerCustomBpmnShape } from './shapes';
+// import { defaultOptions } from './config';
 
 /**
  * BPMN Export Plugin for X6
  */
-export class BpmnExportPlugin {
+export class BpmnExportPlugin implements Graph.Plugin {
     public name = 'bpmn-export';
     private converter: BpmnConverter;
     private graph!: Graph; // Use definite assignment assertion
 
     constructor(options: Partial<BpmnExportOptions> = {}) {
         this.converter = new BpmnConverter(options);
+
+        // 不自动注册BPMN形状
+        // registerBpmnShapes();
+    }
+
+    /**
+     * Dispose plugin resources
+     */
+    dispose(): void {
+        // Clean up any resources if needed
+        // The converter doesn't have a dispose method, so nothing to clean up
     }
 
     /**
@@ -49,7 +61,7 @@ export class BpmnExportPlugin {
         }
 
         const result = await this.converter.convertFromBpmn(xml);
-
+        console.log(result, 'result');
         if (result.data && typeof result.data === 'object') {
             this.applyGraphData(result.data as X6GraphData);
         }
@@ -76,6 +88,13 @@ export class BpmnExportPlugin {
      */
     setOptions(options: Partial<BpmnExportOptions>): void {
         this.converter.setOptions(options);
+    }
+
+    /**
+     * Register custom BPMN shape (allows users to override default shapes)
+     */
+    registerCustomShape(shapeName: string, config: any, isEdge = false, override = true): void {
+        registerCustomBpmnShape(shapeName, config, isEdge, override);
     }
 
     /**
@@ -204,7 +223,17 @@ export namespace BpmnExport {
 // Export types and defaults
 export * from './types';
 export * from './config';
-export { BpmnConverter } from './converter';
+export { BpmnConverter } from './converter.js';
+
+// Export shape registration utilities
+export {
+    registerBpmnShapes,
+    registerCustomBpmnShape,
+    isShapeRegistered,
+    getRegisteredBpmnShapes,
+    BpmnNodeShapes,
+    BpmnEdgeShapes
+} from './shapes';
 
 // Default export
 export default BpmnExportPlugin; 
