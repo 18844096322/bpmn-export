@@ -4,7 +4,7 @@
     "description": "AntV X6 plugin for BPMN XML import/export",
     "main": "lib/index.js",
     "module": "es/index.js",
-    "types": "lib/index.d.ts",
+    "types": "es/index.d.ts",
     "files": [
         "lib",
         "es",

@@ -112,4 +112,16 @@ export interface BpmnElementBounds {
 export interface BpmnWaypoint {
     x: number;
     y: number;
+}
+
+/**
+ * Defines the structure for multi-instance loop characteristics.
+ * This corresponds to the bpmn:MultiInstanceLoopCharacteristics element.
+ */
+export interface LoopCharacteristics {
+    isSequential?: boolean;
+    collection?: string;
+    elementVariable?: string;
+    loopCardinality?: string;
+    completionCondition?: string;
 } 

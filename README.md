@@ -1,35 +1,73 @@
-# BPMN 形状注册指南
+# BPMN Export Plugin 一个可以将X6图形数据导出为BPMN XML，并支持导入BPMN XML生成图形的插件。
 
-## 🎯 解决的问题
 
-在使用X6 BPMN插件时，如果项目中没有预先注册相应的BPMN形状，会出现类似以下错误：
+## 📊 架构
 
 ```
-Node with name 'bpmn-start-event' does not exist.
-Edge with name 'bpmn-sequence-flow' does not exist.
+X6 Data → BpmnConverter → bpmn-moddle → 标准BPMN对象模型 → 标准BPMN XML
 ```
 
-为了解决这个问题，插件内置了完整的BPMN形状定义，并提供了灵活的注册机制。
+## 🔨 使用
 
-### 插件注册
-
-### 手动预注册
-
-插件内置了bpmn形状的定义，并提供了`registerBpmnShapes()`方法来注册这些形状。您可以在创建Graph实例之前调用此方法：
-
+### 静态方法使用
 ```typescript
-import { registerBpmnShapes } from '@x6-plugin/bpmn-export';
+import { BpmnExport } from '@x6-plugin/bpmn-export';
 
-// 在创建Graph之前注册
-registerBpmnShapes();
+// 导出BPMN
+const result = await BpmnExport.toBpmn(graphData, {
+    namespace: 'flowable',
+    includeDI: true,
+    format: true
+});
 
-const graph = new Graph({
-  container: document.getElementById('container')!
+// 导入BPMN
+const graphData = await BpmnExport.fromBpmn(xmlString);
+```
+
+### 实例化使用
+```typescript
+import { BpmnConverter } from '@x6-plugin/bpmn-export';
+
+const converter = new BpmnConverter({
+    processId: 'MyProcess',
+    namespace: 'camunda',
+    targetNamespace: 'http://example.com/bpmn'
+});
+
+// 自定义转换器
+converter.registerNodeConverter('custom-task', {
+    toBpmn(node, moddle) {
+        return moddle.create('bpmn:ServiceTask', {
+            id: node.id,
+            name: node.data?.name
+        });
+    },
+    fromBpmn(element, moddle) {
+        return {
+            data: { name: element.name }
+        };
+    }
 });
 ```
 
-## 📋 内置BPMN形状列表
+### 插件集成使用（推荐）
+```typescript
+import { BpmnExportPlugin } from '@x6-plugin/bpmn-export';
 
+const graph = new Graph({
+    container: document.getElementById('container')!,
+});
+
+graph.use(BpmnExportPlugin({
+    namespace: 'flowable', // 命名空间
+    includeDI: true, // 是否包含BPMN DI信息
+    format: true, // 格式化XML输出
+}));
+
+// 使用扩展的Graph方法
+const result = await graph.exportToBpmn();
+await graph.importFromBpmn(bpmnXml);
+```
 ### 节点形状
 
 | 形状名称 | BPMN类型 | 描述 |
@@ -46,6 +84,14 @@ const graph = new Graph({
 | `bpmn-inclusive-gateway` | InclusiveGateway | 包容网关 |
 | `bpmn-data-object` | DataObject | 数据对象 |
 | `bpmn-data-store` | DataStoreReference | 数据存储 |
+| `bpmn-sub-process` | SubProcess | 子流程 |
+| `bpmn-call-activity` | CallActivity | 调用活动 |
+| `bpmn-business-rule-task` | BusinessRuleTask | 业务规则任务 |
+| `bpmn-event-based-gateway` | EventBasedGateway | 事件网关 |
+| `bpmn-manual-task` | ManualTask | 手动任务 |
+| `bpmn-receive-task` | ReceiveTask | 接收任务 |
+| `bpmn-send-task` | SendTask | 发送任务 |
+
 
 ### 边形状
 
@@ -228,26 +274,17 @@ graph.addEdge({
 });
 ```
 
-## ⚡ 性能优化建议
+## 🛠️ 开发工具
 
-1. **按需注册**: 如果您只使用部分BPMN形状，可以手动注册具体的形状而不是全部注册
-2. **一次性注册**: 在应用启动时统一注册所有需要的形状，避免运行时重复注册
-3. **形状继承**: 利用形状继承机制，基于已有形状创建新形状，减少重复定义
+### 调试支持
+```typescript
+const result = await converter.convertToBpmn(graphData);
 
-## 🐛 常见问题
+// 检查警告
+if (result.warnings.length > 0) {
+    console.warn('转换警告:', result.warnings);
+}
 
-### Q: 为什么我的自定义形状没有生效？
-
-A: 确保在使用形状之前已经注册，并且设置了 `override: true` 参数。
-
-### Q: 如何知道某个形状已经被注册？
-
-A: 使用 `isShapeRegistered(shapeName, isEdge)` 函数检查。
-
-### Q: 插件会影响我项目中的其他形状吗？
-
-A: 不会。插件只注册以 `bpmn-` 开头的形状，不会影响您现有的形状定义。
-
----
-
-通过这套形状注册机制，您可以确保BPMN插件能够正常工作，同时保持高度的定制化灵活性！ 🎉 
+// 检查生成的XML
+console.log('生成的BPMN XML:', result.data);
+```
