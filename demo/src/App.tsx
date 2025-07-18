@@ -20,14 +20,14 @@ const App: React.FC = () => {
         isExecutable: true,
         documentation: '',
         executionListeners: [] as Array<{
-            $type: string;
+            // $type: string;
             event: string;
             class?: string;
             expression?: string;
             delegateExpression?: string;
         }>,
         eventListeners: [] as Array<{
-            $type: string;
+            // $type: string;
             event: string;
             class?: string;
             expression?: string;
@@ -89,7 +89,7 @@ const App: React.FC = () => {
     // Process execution listeners management
     const addExecutionListener = () => {
         const newListener = {
-            $type: 'flowable:ExecutionListener',
+            // $type: 'flowable:ExecutionListener',
             event: 'start',
             expression: '${expression}'
         };
@@ -119,7 +119,7 @@ const App: React.FC = () => {
     // Process event listeners management
     const addEventListener = () => {
         const newListener = {
-            $type: 'flowable:EventListener',
+            // $type: 'flowable:EventListener',
             event: 'PROCESS_STARTED',
             expression: '${expression}'
         };

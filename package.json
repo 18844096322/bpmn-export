@@ -1,6 +1,6 @@
 {
-    "name": "@x6-plugin/bpmn-export",
-    "version": "1.0.0",
+    "name": "x6-bpmn-export-plugin",
+    "version": "1.0.1",
     "description": "AntV X6 plugin for BPMN XML import/export",
     "main": "lib/index.js",
     "module": "es/index.js",
@@ -32,11 +32,15 @@
         "diagram",
         "graph"
     ],
-    "author": "Your Name",
+    "author": "hewensong",
     "license": "MIT",
     "repository": {
         "type": "git",
-        "url": "https://github.com/yourusername/x6-bpmn-export.git"
+        "url": "https://github.com/hewensong/x6-bpmn-export.git"
+    },
+    "homepage": "https://github.com/hewensong/x6-bpmn-export#readme",
+    "bugs": {
+        "url": "https://github.com/hewensong/x6-bpmn-export/issues"
     },
     "peerDependencies": {
         "@antv/x6": ">=2.0.0"

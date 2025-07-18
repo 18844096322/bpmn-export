@@ -1,5 +1,27 @@
-# BPMN Export Plugin 一个可以将X6图形数据导出为BPMN XML，并支持导入BPMN XML生成图形的插件。
+# x6-bpmn-export-plugin
 
+[![npm version](https://badge.fury.io/js/x6-bpmn-export-plugin.svg)](https://badge.fury.io/js/x6-bpmn-export-plugin)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+一个用于 AntV X6 的 BPMN XML 导入/导出插件，支持将 X6 图形数据转换为标准的 BPMN 2.0 XML 格式。
+
+## ✨ 特性
+
+- 🚀 支持 X6 图形数据与 BPMN XML 的双向转换
+- 📊 支持多种 BPMN 元素类型（任务、网关、事件等）
+- 🔧 支持流程引擎扩展（Flowable、Camunda、Activiti）
+- 📝 支持流程级和节点级的文档、扩展属性
+- 🎯 支持全局事件定义（消息、错误、信号、升级）
+- 🔄 支持多实例配置和循环特性
+- 📐 支持 BPMN DI（图形信息）的导入导出
+- 🎛️ 支持任务监听器、执行监听器等扩展元素
+- 🔗 支持条件表达式和脚本配置
+
+## 📦 安装
+
+```bash
+npm install x6-bpmn-export-plugin
+```
 
 ## 📊 架构
 
@@ -289,82 +311,497 @@ if (result.warnings.length > 0) {
 console.log('生成的BPMN XML:', result.data);
 ```
 
-## 业务属性
+## 📋 支持的BPMN元素类型
 
-除了常规的图形属性外，BPMN形状还支持额外的业务属性。例如：异步、多实例、扩展元素等。
-通常是作为节点或边的自定义属性存储，并在导出时转换为BPMN XML的相应元素。bpmn使用两种形式保存属性：
+### 🎯 事件类型
+| X6 Shape | BPMN 类型 | 描述 |
+|----------|-----------|------|
+| `bpmn-start-event` | StartEvent | 开始事件 |
+| `bpmn-start-message-event` | StartEvent | 消息开始事件 |
+| `bpmn-start-timer-event` | StartEvent | 定时开始事件 |
+| `bpmn-end-event` | EndEvent | 结束事件 |
+| `bpmn-end-message-event` | EndEvent | 消息结束事件 |
+| `bpmn-intermediate-event` | IntermediateCatchEvent | 中间捕获事件 |
+| `bpmn-boundary-event` | BoundaryEvent | 边界事件 |
 
-1. 直接在节点或边上定义属性，例如下列中的id、name、async等。
-```<serviceTask id="service-task" name="服务任务" implementation="class" async="true">```
-2. 使用单独的元素标签表示，如`bpmn:extensionElements`、`bpmn:field`、`bpmn:in`、`bpmn:out`、`bpmn:multiInstanceLoopCharacteristics`等。
+### 📋 任务类型
+| X6 Shape | BPMN 类型 | 描述 |
+|----------|-----------|------|
+| `bpmn-task` | Task | 基础任务 |
+| `bpmn-user-task` | UserTask | 用户任务 |
+| `bpmn-service-task` | ServiceTask | 服务任务 |
+| `bpmn-script-task` | ScriptTask | 脚本任务 |
+| `bpmn-send-task` | SendTask | 发送任务 |
+| `bpmn-receive-task` | ReceiveTask | 接收任务 |
+| `bpmn-manual-task` | ManualTask | 手工任务 |
+| `bpmn-business-rule-task` | BusinessRuleTask | 业务规则任务 |
+| `bpmn-call-activity` | CallActivity | 调用活动 |
 
-构建这些属性需要要特殊的数据结构，以下是当前支持的所有属性以及数据结构，在构建表单时，请务必保证数据结构的正确性。
+### 🔀 网关类型
+| X6 Shape | BPMN 类型 | 描述 |
+|----------|-----------|------|
+| `bpmn-exclusive-gateway` | ExclusiveGateway | 排他网关 |
+| `bpmn-inclusive-gateway` | InclusiveGateway | 包容网关 |
+| `bpmn-parallel-gateway` | ParallelGateway | 并行网关 |
+| `bpmn-event-based-gateway` | EventBasedGateway | 事件网关 |
 
-### id
-类型：`string`
-说明： 节点唯一id
+### 🏗️ 其他元素
+| X6 Shape | BPMN 类型 | 描述 |
+|----------|-----------|------|
+| `bpmn-subprocess` | SubProcess | 子流程 |
+| `bpmn-data-object` | DataObject | 数据对象 |
+| `bpmn-data-store` | DataStoreReference | 数据存储引用 |
 
-### name
-类型：`string`
-说明： 节点名称
+## 🔧 业务属性配置
 
-### async
-类型：`boolean`
-说明： 是否异步
+插件支持丰富的BPMN业务属性配置，这些属性通过节点的`data`字段进行设置，并在导出时转换为相应的BPMN XML元素。
 
-### implementation
-类型：`string`
-说明： 实现方式，例如 `class`, `delegateExpression` 等。
+### 📝 通用属性（所有节点类型）
 
-### class
-类型：`string`
-说明： 当实现方式为类时使用的全限定名。
-
-### delegateExpression
-类型：`string`
-说明： 当实现方式为表达式时使用的表达式字符串。
-
-### expression
-类型：`string`
-说明： 表达式内容，通常用在条件流或脚本任务中。
-
-### documenation
-类型：`string`
-说明： 文档链接或描述。
-
-### extensionElements
-类型：`object`
-说明： 扩展元素，可以包含多个字段和属性。
-例如:
-```json
-"extensionElements":[
-    {
-        "$type": "flowable:taskListener",
-        "event": "create",
-        "expression": "${expression}"
-    },
-    {
-      "$type": "flowable:executionListener",
-      "event": "create",
-      "expression": "${expression}"
-    },
-    {
-      "$type": "flowable:field",
-      "name": "fieldName",
-      "string": "fieldValue"
-    }
-]
+#### 基础属性
+```typescript
+{
+  id: string,              // 节点唯一标识符
+  name: string,            // 节点显示名称
+  documentation: string,   // 节点描述文档
+  async: boolean          // 是否异步执行（仅任务类型）
+}
 ```
 
-### loopCharacteristics
-类型：`object`
-说明： 多实例特性配置。
-例如:
-```json
-loopCharacteristics: {
-    "flowable:collection": "集合",
-    "loopCardinality": "循环基数",
-    "flowable:elementVariable": "元素变量",
-    "completionCondition": "完成条件"
+#### 扩展属性
+```typescript
+{
+  extensionProperties: Array<{
+    name: string,    // 属性名
+    value: string    // 属性值
+  }>
+}
+```
+
+### 👤 用户任务 (UserTask) 专有属性
+
+```typescript
+{
+  assignee: string,           // 办理人
+  candidateUsers: string,     // 候选用户（逗号分隔）
+  candidateGroups: string,    // 候选组（逗号分隔）
+  dueDate: string,           // 到期时间
+  priority: string           // 优先级
+}
+```
+
+**示例：**
+```typescript
+const userTaskData = {
+  name: "审批任务",
+  assignee: "admin",
+  candidateUsers: "user1,user2,user3",
+  candidateGroups: "managers,supervisors",
+  documentation: "这是一个需要管理员审批的任务"
+}
+```
+
+### ⚙️ 服务任务 (ServiceTask) 专有属性
+
+```typescript
+{
+  implementation: string,        // 实现类全限定名
+  delegateExpression: string,    // 委托表达式
+  expression: string,           // 执行表达式
+  resultVariable: string        // 结果变量名
+}
+```
+
+**示例：**
+```typescript
+const serviceTaskData = {
+  name: "发送邮件",
+  implementation: "com.example.EmailService",
+  delegateExpression: "${emailService}",
+  async: true
+}
+```
+
+### 📜 脚本任务 (ScriptTask) 专有属性
+
+```typescript
+{
+  scriptFormat: string,    // 脚本语言格式（如：javascript, groovy）
+  script: string,         // 脚本内容
+  resultVariable: string  // 结果变量名
+}
+```
+
+**示例：**
+```typescript
+const scriptTaskData = {
+  name: "计算总价",
+  scriptFormat: "javascript",
+  script: "var total = price * quantity; execution.setVariable('total', total);",
+  resultVariable: "calculatedTotal"
+}
+```
+
+### 🔄 多实例配置 (Multi-Instance)
+
+适用于所有任务类型和子流程，支持并行和串行多实例执行：
+
+```typescript
+{
+  loopCharacteristics: {
+    isSequential: boolean,                    // 是否串行执行
+    loopCardinality: string,                 // 循环基数
+    "flowable:collection": string,           // 集合变量
+    "flowable:elementVariable": string,      // 元素变量
+    completionCondition: string              // 完成条件
   }
+}
 ```
+
+**示例：**
+```typescript
+const multiInstanceTaskData = {
+  name: "批量处理任务",
+  loopCharacteristics: {
+    isSequential: false,
+    "flowable:collection": "userList",
+    "flowable:elementVariable": "user",
+    completionCondition: "${nrOfCompletedInstances == nrOfInstances}"
+  }
+}
+```
+
+### 🎧 扩展元素 (Extension Elements)
+
+支持任务监听器、执行监听器和字段配置：
+
+```typescript
+{
+  extensionElements: Array<{
+    event: string,        // 事件类型
+    class?: string,       // Java类名
+    expression?: string,  // 表达式
+    delegateExpression?: string,  // 委托表达式
+    name?: string,        // 字段名（仅field类型）
+    string?: string       // 字段值（仅field类型）
+  }>
+}
+```
+
+#### 任务监听器 (Task Listener)
+```typescript
+{
+  extensionElements: [
+    {
+      event: "create",  // create, assignment, complete
+      class: "com.example.TaskCreateListener"
+    }
+  ]
+}
+```
+
+#### 执行监听器 (Execution Listener)
+```typescript
+{
+  extensionElements: [
+    {
+      event: "start",  // start, end, take
+      expression: "${listenerBean.onStart(execution)}"
+    }
+  ]
+}
+```
+
+#### 字段配置 (Field)
+```typescript
+{
+  extensionElements: [
+    {
+      name: "emailTemplate",
+      string: "welcome-email.html"
+    }
+  ]
+}
+```
+
+### 🌐 流程级属性
+
+流程级属性通过导出选项进行配置：
+
+```typescript
+const exportOptions = {
+  processId: "demo-process",
+  processName: "演示流程",
+  isExecutable: true,
+  documentation: "这是一个演示流程",
+
+  // 流程级执行监听器
+  executionListeners: [
+    {
+      event: "start",
+      class: "com.example.ProcessStartListener"
+    }
+  ],
+
+  // 流程级事件监听器
+  eventListeners: [
+    {
+      event: "PROCESS_STARTED",
+      class: "com.example.ProcessEventListener"
+    }
+  ],
+
+  // 流程级扩展属性
+  extensionProperties: [
+    {
+      name: "timeout",
+      value: "30000"
+    }
+  ],
+
+  // 数据对象定义
+  dataObjects: [
+    {
+      id: "customerData",
+      name: "客户数据",
+      itemSubjectRef: "CustomerType"
+    }
+  ]
+}
+```
+
+### 🌍 全局事件定义
+
+支持消息、错误、信号和升级事件的全局定义：
+
+```typescript
+const globalEvents = {
+  // 消息定义
+  messages: [
+    {
+      id: "paymentRequest",
+      name: "支付请求消息"
+    }
+  ],
+
+  // 错误定义
+  errors: [
+    {
+      id: "paymentError",
+      name: "支付错误",
+      errorCode: "PAYMENT_FAILED"
+    }
+  ],
+
+  // 信号定义
+  signals: [
+    {
+      id: "approvalSignal",
+      name: "审批信号"
+    }
+  ],
+
+  // 升级定义
+  escalations: [
+    {
+      id: "timeoutEscalation",
+      name: "超时升级",
+      escalationCode: "TIMEOUT"
+    }
+  ]
+}
+```
+
+## 🚀 完整使用示例
+
+### 创建复杂的业务流程
+
+```typescript
+import { Graph } from '@antv/x6'
+import { BpmnExportPlugin } from 'x6-bpmn-export-plugin'
+
+// 创建图形实例
+const graph = new Graph({
+  container: document.getElementById('container')!,
+  width: 1200,
+  height: 800
+})
+
+// 注册插件
+graph.use(new BpmnExportPlugin({
+  namespace: 'flowable',
+  processId: 'order-process',
+  processName: '订单处理流程'
+}))
+
+// 添加开始事件
+graph.addNode({
+  id: 'start',
+  shape: 'bpmn-start-event',
+  x: 100,
+  y: 200,
+  data: {
+    name: '订单创建',
+    documentation: '客户创建新订单时触发'
+  }
+})
+
+// 添加用户任务
+graph.addNode({
+  id: 'review-task',
+  shape: 'bpmn-user-task',
+  x: 300,
+  y: 200,
+  data: {
+    name: '订单审核',
+    assignee: 'reviewer',
+    candidateGroups: 'sales-team',
+    documentation: '销售团队审核订单信息',
+    extensionProperties: [
+      { name: 'formKey', value: 'order-review-form' }
+    ],
+    extensionElements: [
+      {
+        event: 'create',
+        class: 'com.example.OrderReviewTaskListener'
+      }
+    ]
+  }
+})
+
+// 添加服务任务
+graph.addNode({
+  id: 'payment-task',
+  shape: 'bpmn-service-task',
+  x: 500,
+  y: 200,
+  data: {
+    name: '处理支付',
+    implementation: 'com.example.PaymentService',
+    async: true,
+    documentation: '调用支付服务处理订单支付',
+    extensionElements: [
+      {
+        name: 'paymentGateway',
+        string: 'stripe'
+      }
+    ]
+  }
+})
+
+// 添加脚本任务
+graph.addNode({
+  id: 'calculate-task',
+  shape: 'bpmn-script-task',
+  x: 700,
+  y: 200,
+  data: {
+    name: '计算折扣',
+    scriptFormat: 'javascript',
+    script: `
+      var discount = 0;
+      if (orderAmount > 1000) {
+        discount = orderAmount * 0.1;
+      }
+      execution.setVariable('discount', discount);
+    `,
+    resultVariable: 'calculatedDiscount'
+  }
+})
+
+// 添加连接线
+graph.addEdge({
+  source: 'start',
+  target: 'review-task',
+  shape: 'bpmn-sequence-flow'
+})
+
+graph.addEdge({
+  source: 'review-task',
+  target: 'payment-task',
+  shape: 'bpmn-sequence-flow'
+})
+
+graph.addEdge({
+  source: 'payment-task',
+  target: 'calculate-task',
+  shape: 'bpmn-sequence-flow'
+})
+
+// 导出BPMN
+const exportResult = await graph.exportToBpmn({
+  namespace: 'flowable',
+  includeDI: true,
+  format: true,
+  globalEvents: {
+    messages: [
+      { id: 'orderCreated', name: '订单创建消息' }
+    ],
+    errors: [
+      { id: 'paymentFailed', name: '支付失败', errorCode: 'PAYMENT_ERROR' }
+    ]
+  }
+})
+
+console.log(exportResult.data) // 生成的BPMN XML
+```
+
+## 📖 API 参考
+
+### BpmnExportPlugin 配置选项
+
+```typescript
+interface BpmnExportOptions {
+  targetNamespace?: string          // BPMN目标命名空间
+  processId?: string               // 流程ID
+  processName?: string             // 流程名称
+  isExecutable?: boolean           // 是否可执行
+  namespace?: 'flowable' | 'camunda' | 'activiti'  // 引擎类型
+  includeDI?: boolean              // 是否包含图形信息
+  format?: boolean                 // 是否格式化XML
+  documentation?: string           // 流程文档
+  executionListeners?: Array<...>  // 执行监听器
+  eventListeners?: Array<...>      // 事件监听器
+  dataObjects?: Array<...>         // 数据对象
+  extensionProperties?: Array<...> // 扩展属性
+}
+```
+
+### 导出方法
+
+```typescript
+// 插件方法
+const result = await graph.exportToBpmn(options)
+
+// 静态方法
+const result = await BpmnExport.toBpmn(graphData, options)
+```
+
+### 导入方法
+
+```typescript
+// 插件方法
+await graph.importFromBpmn(bpmnXml, options)
+
+// 静态方法
+const graphData = await BpmnExport.fromBpmn(bpmnXml, options)
+```
+
+## 🔍 故障排除
+
+### 常见问题
+
+1. **扩展属性未正确导出**
+   - 确保扩展属性数组格式正确
+   - 检查属性名和值是否为字符串类型
+
+2. **监听器配置无效**
+   - 确保事件类型与监听器类型匹配
+
+3. **多实例配置不生效**
+   - 检查`loopCharacteristics`对象结构
+   - 确保集合变量和元素变量名称正确
+
+## 📄 许可证
+
+MIT License
