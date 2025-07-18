@@ -43,12 +43,18 @@ export class BpmnExportPlugin implements Graph.Plugin {
     /**
      * Export graph to BPMN XML
      */
-    async exportToBpmn(options?: Partial<BpmnExportOptions>): Promise<ConversionResult> {
+    async exportToBpmn(options?: Partial<BpmnExportOptions & { globalEvents?: any }>): Promise<ConversionResult> {
         if (options) {
             this.converter.setOptions(options);
         }
 
         const graphData = this.extractGraphData();
+
+        // Add global events if provided
+        if (options?.globalEvents) {
+            graphData.globalEvents = options.globalEvents;
+        }
+
         return await this.converter.convertToBpmn(graphData);
     }
 
@@ -170,7 +176,7 @@ export class BpmnExportPlugin implements Graph.Plugin {
         const self = this;
 
         // Extend Graph prototype with BPMN methods
-        (this.graph as any).exportToBpmn = async function (options?: Partial<BpmnExportOptions>) {
+        (this.graph as any).exportToBpmn = async function (options?: Partial<BpmnExportOptions & { globalEvents?: any }>) {
             return await self.exportToBpmn(options);
         };
 

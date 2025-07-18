@@ -288,3 +288,83 @@ if (result.warnings.length > 0) {
 // 检查生成的XML
 console.log('生成的BPMN XML:', result.data);
 ```
+
+## 业务属性
+
+除了常规的图形属性外，BPMN形状还支持额外的业务属性。例如：异步、多实例、扩展元素等。
+通常是作为节点或边的自定义属性存储，并在导出时转换为BPMN XML的相应元素。bpmn使用两种形式保存属性：
+
+1. 直接在节点或边上定义属性，例如下列中的id、name、async等。
+```<serviceTask id="service-task" name="服务任务" implementation="class" async="true">```
+2. 使用单独的元素标签表示，如`bpmn:extensionElements`、`bpmn:field`、`bpmn:in`、`bpmn:out`、`bpmn:multiInstanceLoopCharacteristics`等。
+
+构建这些属性需要要特殊的数据结构，以下是当前支持的所有属性以及数据结构，在构建表单时，请务必保证数据结构的正确性。
+
+### id
+类型：`string`
+说明： 节点唯一id
+
+### name
+类型：`string`
+说明： 节点名称
+
+### async
+类型：`boolean`
+说明： 是否异步
+
+### implementation
+类型：`string`
+说明： 实现方式，例如 `class`, `delegateExpression` 等。
+
+### class
+类型：`string`
+说明： 当实现方式为类时使用的全限定名。
+
+### delegateExpression
+类型：`string`
+说明： 当实现方式为表达式时使用的表达式字符串。
+
+### expression
+类型：`string`
+说明： 表达式内容，通常用在条件流或脚本任务中。
+
+### documenation
+类型：`string`
+说明： 文档链接或描述。
+
+### extensionElements
+类型：`object`
+说明： 扩展元素，可以包含多个字段和属性。
+例如:
+```json
+"extensionElements":[
+    {
+        "$type": "flowable:taskListener",
+        "event": "create",
+        "expression": "${expression}"
+    },
+    {
+      "$type": "flowable:executionListener",
+      "event": "create",
+      "expression": "${expression}"
+    },
+    {
+      "$type": "flowable:field",
+      "name": "fieldName",
+      "string": "fieldValue"
+    }
+]
+```
+
+### loopCharacteristics
+类型：`object`
+说明： 多实例特性配置。
+例如:
+```json
+loopCharacteristics: {
+    "flowable:collection": "集合",
+    "loopCardinality": "循环基数",
+    "flowable:elementVariable": "元素变量",
+    "completionCondition": "完成条件"
+  }
+```

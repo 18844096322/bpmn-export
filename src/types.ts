@@ -4,11 +4,54 @@
  */
 
 /**
+ * Global event definitions
+ */
+export interface GlobalEvents {
+    messages?: Array<{ id: string; name: string; itemRef?: string }>;
+    errors?: Array<{ id: string; name: string; errorCode?: string; structureRef?: string }>;
+    signals?: Array<{ id: string; name: string; structureRef?: string }>;
+    escalations?: Array<{ id: string; name: string; escalationCode?: string; structureRef?: string }>;
+}
+
+/**
+ * Process properties extracted from BPMN
+ */
+export interface ProcessProperties {
+    documentation?: string;
+    executionListeners?: Array<{
+        $type: string;
+        event: string;
+        class?: string;
+        expression?: string;
+        delegateExpression?: string;
+    }>;
+    eventListeners?: Array<{
+        $type: string;
+        event: string;
+        class?: string;
+        expression?: string;
+        delegateExpression?: string;
+    }>;
+    dataObjects?: Array<{
+        id: string;
+        name: string;
+        itemSubjectRef?: string;
+        isCollection?: boolean;
+    }>;
+    extensionProperties?: Array<{
+        name: string;
+        value: string;
+    }>;
+}
+
+/**
  * X6 Graph data structure
  */
 export interface X6GraphData {
     nodes: X6NodeData[];
     edges: X6EdgeData[];
+    globalEvents?: GlobalEvents;
+    processProperties?: ProcessProperties;
 }
 
 /**
@@ -58,6 +101,8 @@ export interface BpmnExportOptions {
     processId?: string;
     /** Process name */
     processName?: string;
+    /** Whether the process is executable */
+    isExecutable?: boolean;
     /** BPMN engine namespace (flowable, camunda, activiti) */
     namespace?: 'flowable' | 'camunda' | 'activiti';
     /** Custom node type mappings */
@@ -66,6 +111,36 @@ export interface BpmnExportOptions {
     includeDI?: boolean;
     /** Format output XML */
     format?: boolean;
+    /** Process documentation */
+    documentation?: string;
+    /** Process execution listeners */
+    executionListeners?: Array<{
+        $type: string;
+        event: string;
+        class?: string;
+        expression?: string;
+        delegateExpression?: string;
+    }>;
+    /** Process event listeners */
+    eventListeners?: Array<{
+        $type: string;
+        event: string;
+        class?: string;
+        expression?: string;
+        delegateExpression?: string;
+    }>;
+    /** Data objects */
+    dataObjects?: Array<{
+        id: string;
+        name: string;
+        itemSubjectRef?: string;
+        isCollection?: boolean;
+    }>;
+    /** Extension properties */
+    extensionProperties?: Array<{
+        name: string;
+        value: string;
+    }>;
 }
 
 /**

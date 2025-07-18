@@ -11,10 +11,16 @@ export const defaultOptions: Required<BpmnExportOptions> = {
     targetNamespace: 'http://bpmn.io/schema/bpmn',
     processId: 'Process_1',
     processName: 'Business Process',
+    isExecutable: true,
     namespace: 'flowable',
     nodeTypeMappings: {},
     includeDI: true,
-    format: true
+    format: true,
+    documentation: '',
+    executionListeners: [],
+    eventListeners: [],
+    dataObjects: [],
+    extensionProperties: []
 };
 
 /**

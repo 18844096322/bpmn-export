@@ -131,6 +131,8 @@ const result = await BpmnExport.fromBpmn(bpmnXml);
 </definitions>
 ```
 
+
+
 ## 🎨 自定义测试
 
 您可以在demo中进行以下自定义测试：
@@ -143,3 +145,5 @@ const result = await BpmnExport.fromBpmn(bpmnXml);
 ---
 
 **通过这个demo，您可以全面验证BPMN Export Plugin的所有核心功能！** 🎉 
+
+## 属性表单构造

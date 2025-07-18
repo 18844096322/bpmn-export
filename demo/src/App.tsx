@@ -1,669 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { Graph, Cell, Node, Edge } from '@antv/x6'
+import { Graph, Node, Edge } from '@antv/x6'
 import {
     BpmnExportPlugin,
     BpmnExport,
     registerBpmnShapes,
     getRegisteredBpmnShapes
 } from '@x6-plugin/bpmn-export'
-
-// Property sidebar styles
-const sidebarStyles = {
-    sidebar: {
-        position: 'absolute',
-        right: 0,
-        top: 0,
-        width: '300px',
-        height: '100%',
-        background: '#f8f8f8',
-        borderLeft: '1px solid #ddd',
-        padding: '10px',
-        boxSizing: 'border-box',
-        overflowY: 'auto',
-        color: 'black',
-    },
-    form: {
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '10px',
-    },
-    formGroup: {
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '5px',
-    },
-    label: {
-        fontWeight: 'bold',
-    },
-    input: {
-        padding: '8px',
-        borderRadius: '4px',
-        border: '1px solid #ddd',
-    },
-    select: {
-        padding: '8px',
-        borderRadius: '4px',
-        border: '1px solid #ddd',
-    },
-    button: {
-        padding: '8px 12px',
-        background: '#4a90e2',
-        // color: 'white',
-        border: 'none',
-        borderRadius: '4px',
-        cursor: 'pointer',
-        marginTop: '10px',
-    },
-    extensionGroup: {
-        border: '1px solid #ddd',
-        padding: '10px',
-        borderRadius: '4px',
-        marginTop: '5px',
-        backgroundColor: '#f1f1f1',
-    },
-    addButton: {
-        padding: '5px 10px',
-        background: '#4caf50',
-        color: 'white',
-        border: 'none',
-        borderRadius: '4px',
-        cursor: 'pointer',
-        marginTop: '5px',
-        fontSize: '12px',
-    },
-    removeButton: {
-        padding: '3px 8px',
-        background: '#f44336',
-        color: 'white',
-        border: 'none',
-        borderRadius: '4px',
-        cursor: 'pointer',
-        marginLeft: '5px',
-        fontSize: '12px',
-    },
-    extensionHeader: {
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: '5px',
-    }
-}
-
-// Property sidebar component
-const PropertySidebar = ({ selectedNode, onPropertyChange }: any) => {
-    const [extensionType, setExtensionType] = useState<string>('taskListener');
-
-    if (!selectedNode) {
-        return (
-            <div style={sidebarStyles.sidebar as React.CSSProperties}>
-                <h3>属性面板</h3>
-                <p>请选择一个节点查看属性</p>
-            </div>
-        )
-    }
-
-    const { shape, data = {} } = selectedNode;
-    const nodeType = shape.replace('bpmn-', '');
-
-    // Initialize or get existing extensionElements
-    const extensionElements = data.extensionElements || [];
-
-    const handleNestedPropertyChange = (objectKey: string, propertyKey: string, value: any) => {
-        const newObject = {
-            ...(data[objectKey] || {}),
-            [propertyKey]: value,
-        };
-        if (value === '' || value === undefined) {
-            delete newObject[propertyKey];
-        }
-        onPropertyChange(objectKey, newObject);
-    };
-
-    // Add a new extension element
-    const addExtensionElement = (e: React.MouseEvent) => {
-        e.preventDefault(); // 阻止表单提交
-        const newExtension: any = { $type: `flowable:${extensionType}` };
-
-        // Set default properties based on extension type
-        if (extensionType === 'taskListener' || extensionType === 'executionListener') {
-            newExtension.event = 'create';
-            newExtension.expression = '${expression}';
-        } else if (extensionType === 'field') {
-            newExtension.name = 'fieldName';
-            newExtension.string = 'fieldValue';
-        }
-
-        const updatedExtensions =
-            [...extensionElements, newExtension]
-            ;
-
-        onPropertyChange('extensionElements', updatedExtensions);
-    };
-
-    // Remove an extension element
-    const removeExtensionElement = (index: number, e: React.MouseEvent) => {
-        e.preventDefault(); // 阻止表单提交
-        const updatedValues = [...extensionElements];
-        updatedValues.splice(index, 1);
-
-        const updatedExtensions =
-            updatedValues
-            ;
-
-        onPropertyChange('extensionElements', updatedExtensions);
-    };
-
-    // Update an extension element property
-    const updateExtensionElement = (index: number, prop: string, value: any) => {
-        const updatedValues = [...extensionElements];
-        updatedValues[index][prop] = value;
-
-        const updatedExtensions =
-            updatedValues
-            ;
-
-        onPropertyChange('extensionElements', updatedExtensions);
-    };
-
-    // Determine which properties to show based on node type
-    const renderPropertyFields = () => {
-        const commonFields = (
-            <>
-                <div style={sidebarStyles.formGroup as React.CSSProperties}>
-                    <label style={sidebarStyles.label as React.CSSProperties}>ID</label>
-                    <input
-                        style={sidebarStyles.input as React.CSSProperties}
-                        type="text"
-                        value={selectedNode.id}
-                        disabled
-                    />
-                </div>
-                <div style={sidebarStyles.formGroup as React.CSSProperties}>
-                    <label style={sidebarStyles.label as React.CSSProperties}>名称</label>
-                    <input
-                        style={sidebarStyles.input as React.CSSProperties}
-                        type="text"
-                        value={data.name || ''}
-                        onChange={(e) => onPropertyChange('name', e.target.value)}
-                    />
-                </div>
-            </>
-        );
-
-        const loopCharacteristics = data.loopCharacteristics || {};
-
-        const showMultiInstance =
-            nodeType.includes('task') ||
-            nodeType === 'call-activity' ||
-            nodeType === 'subprocess';
-
-        const multiInstanceForm = (
-            <div style={sidebarStyles.formGroup as React.CSSProperties}>
-                <label style={sidebarStyles.label as React.CSSProperties}>多实例配置</label>
-                <div style={sidebarStyles.extensionGroup as React.CSSProperties}>
-                    <div style={sidebarStyles.formGroup as React.CSSProperties}>
-                        <label style={sidebarStyles.label as React.CSSProperties}>执行方式</label>
-                        <select
-                            style={sidebarStyles.select as React.CSSProperties}
-                            value={loopCharacteristics.isSequential ? 'sequential' : 'parallel'}
-                            onChange={(e) => handleNestedPropertyChange('loopCharacteristics', 'isSequential', e.target.value === 'sequential')}
-                        >
-                            <option value="parallel">并行 (Parallel)</option>
-                            <option value="sequential">串行 (Sequential)</option>
-                        </select>
-                    </div>
-                    <div style={sidebarStyles.formGroup as React.CSSProperties}>
-                        <label style={sidebarStyles.label as React.CSSProperties}>循环基数 (Loop Cardinality)</label>
-                        <input
-                            style={sidebarStyles.input as React.CSSProperties}
-                            type="text"
-                            placeholder="e.g., 5 or ${items.size()}"
-                            value={loopCharacteristics.loopCardinality || ''}
-                            onChange={(e) => handleNestedPropertyChange('loopCharacteristics', 'loopCardinality', e.target.value)}
-                        />
-                    </div>
-                    <div style={sidebarStyles.formGroup as React.CSSProperties}>
-                        <label style={sidebarStyles.label as React.CSSProperties}>集合 (Collection)</label>
-                        <input
-                            style={sidebarStyles.input as React.CSSProperties}
-                            type="text"
-                            placeholder="e.g., myCollection"
-                            value={loopCharacteristics['flowable:collection'] || ''}
-                            onChange={(e) => handleNestedPropertyChange('loopCharacteristics', 'flowable:collection', e.target.value)}
-                        />
-                    </div>
-                    <div style={sidebarStyles.formGroup as React.CSSProperties}>
-                        <label style={sidebarStyles.label as React.CSSProperties}>元素变量 (Element Variable)</label>
-                        <input
-                            style={sidebarStyles.input as React.CSSProperties}
-                            type="text"
-                            placeholder="e.g., item"
-                            value={loopCharacteristics['flowable:elementVariable'] || ''}
-                            onChange={(e) => handleNestedPropertyChange('loopCharacteristics', 'flowable:elementVariable', e.target.value)}
-                        />
-                    </div>
-                    <div style={sidebarStyles.formGroup as React.CSSProperties}>
-                        <label style={sidebarStyles.label as React.CSSProperties}>完成条件 (Completion Condition)</label>
-                        <input
-                            style={sidebarStyles.input as React.CSSProperties}
-                            type="text"
-                            placeholder="e.g., ${nrOfCompletedInstances == 5}"
-                            value={loopCharacteristics.completionCondition || ''}
-                            onChange={(e) => handleNestedPropertyChange('loopCharacteristics', 'completionCondition', e.target.value)}
-                        />
-                    </div>
-                </div>
-            </div>
-        );
-
-        // Task specific fields
-        if (nodeType.includes('task')) {
-            return (
-                <>
-                    {commonFields}
-                    <div style={sidebarStyles.formGroup as React.CSSProperties}>
-                        <label style={sidebarStyles.label as React.CSSProperties}>是否异步</label>
-                        <select
-                            style={sidebarStyles.select as React.CSSProperties}
-                            value={data.async ? 'true' : 'false'}
-                            onChange={(e) => onPropertyChange('async', e.target.value === 'true')}
-                        >
-                            <option value="false">否</option>
-                            <option value="true">是</option>
-                        </select>
-                    </div>
-
-                    {/* User task specific fields */}
-                    {nodeType === 'user-task' && (
-                        <>
-                            <div style={sidebarStyles.formGroup as React.CSSProperties}>
-                                <label style={sidebarStyles.label as React.CSSProperties}>办理人</label>
-                                <input
-                                    style={sidebarStyles.input as React.CSSProperties}
-                                    type="text"
-                                    value={data.assignee || ''}
-                                    onChange={(e) => onPropertyChange('assignee', e.target.value)}
-                                />
-                            </div>
-                            <div style={sidebarStyles.formGroup as React.CSSProperties}>
-                                <label style={sidebarStyles.label as React.CSSProperties}>候选用户</label>
-                                <input
-                                    style={sidebarStyles.input as React.CSSProperties}
-                                    type="text"
-                                    value={data.candidateUsers || ''}
-                                    onChange={(e) => onPropertyChange('candidateUsers', e.target.value)}
-                                />
-                            </div>
-                            <div style={sidebarStyles.formGroup as React.CSSProperties}>
-                                <label style={sidebarStyles.label as React.CSSProperties}>候选组</label>
-                                <input
-                                    style={sidebarStyles.input as React.CSSProperties}
-                                    type="text"
-                                    value={data.candidateGroups || ''}
-                                    onChange={(e) => onPropertyChange('candidateGroups', e.target.value)}
-                                />
-                            </div>
-                        </>
-                    )}
-
-                    {/* Service task specific fields */}
-                    {nodeType === 'service-task' && (
-                        <>
-                            <div style={sidebarStyles.formGroup as React.CSSProperties}>
-                                <label style={sidebarStyles.label as React.CSSProperties}>实现类</label>
-                                <input
-                                    style={sidebarStyles.input as React.CSSProperties}
-                                    type="text"
-                                    value={data.implementation || ''}
-                                    onChange={(e) => onPropertyChange('implementation', e.target.value)}
-                                />
-                            </div>
-                            <div style={sidebarStyles.formGroup as React.CSSProperties}>
-                                <label style={sidebarStyles.label as React.CSSProperties}>委托表达式</label>
-                                <input
-                                    style={sidebarStyles.input as React.CSSProperties}
-                                    type="text"
-                                    value={data.delegateExpression || ''}
-                                    onChange={(e) => onPropertyChange('delegateExpression', e.target.value)}
-                                />
-                            </div>
-                        </>
-                    )}
-
-                    {/* Script task specific fields */}
-                    {nodeType === 'script-task' && (
-                        <>
-                            <div style={sidebarStyles.formGroup as React.CSSProperties}>
-                                <label style={sidebarStyles.label as React.CSSProperties}>脚本格式</label>
-                                <input
-                                    style={sidebarStyles.input as React.CSSProperties}
-                                    type="text"
-                                    value={data.scriptFormat || ''}
-                                    onChange={(e) => onPropertyChange('scriptFormat', e.target.value)}
-                                />
-                            </div>
-                            <div style={sidebarStyles.formGroup as React.CSSProperties}>
-                                <label style={sidebarStyles.label as React.CSSProperties}>脚本内容</label>
-                                <textarea
-                                    style={{ ...sidebarStyles.input as React.CSSProperties, height: '100px' }}
-                                    value={data.script || ''}
-                                    onChange={(e) => onPropertyChange('script', e.target.value)}
-                                />
-                            </div>
-                        </>
-                    )}
-
-                    {showMultiInstance && multiInstanceForm}
-
-                    {/* Extension elements section for tasks */}
-                    <div style={sidebarStyles.formGroup as React.CSSProperties}>
-                        <label style={sidebarStyles.label as React.CSSProperties}>扩展元素</label>
-
-                        {/* Add new extension element */}
-                        <div style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
-                            <select
-                                style={sidebarStyles.select as React.CSSProperties}
-                                value={extensionType}
-                                onChange={(e) => setExtensionType(e.target.value)}
-                            >
-                                <option value="taskListener">任务监听器</option>
-                                <option value="executionListener">执行监听器</option>
-                                <option value="field">字段</option>
-                            </select>
-                            <button
-                                style={sidebarStyles.addButton as React.CSSProperties}
-                                onClick={(e) => addExtensionElement(e)}
-                            >
-                                添加
-                            </button>
-                        </div>
-
-                        {/* List of extension elements */}
-                        {extensionElements && extensionElements.map((extension: any, index: number) => {
-                            const extensionTypeName = extension.$type.split(':')[1];
-
-                            return (
-                                <div key={index} style={sidebarStyles.extensionGroup as React.CSSProperties}>
-                                    <div style={sidebarStyles.extensionHeader as React.CSSProperties}>
-                                        <strong>{extensionTypeName}</strong>
-                                        <button
-                                            style={sidebarStyles.removeButton as React.CSSProperties}
-                                            onClick={(e) => removeExtensionElement(index, e)}
-                                        >
-                                            删除
-                                        </button>
-                                    </div>
-
-                                    {/* TaskListener or ExecutionListener fields */}
-                                    {(extensionTypeName === 'taskListener' || extensionTypeName === 'executionListener') && (
-                                        <>
-                                            <div style={sidebarStyles.formGroup as React.CSSProperties}>
-                                                <label style={sidebarStyles.label as React.CSSProperties}>事件</label>
-                                                <select
-                                                    style={sidebarStyles.select as React.CSSProperties}
-                                                    value={extension.event || 'create'}
-                                                    onChange={(e) => updateExtensionElement(index, 'event', e.target.value)}
-                                                >
-                                                    <option value="create">创建 (create)</option>
-                                                    <option value="assignment">分配 (assignment)</option>
-                                                    <option value="complete">完成 (complete)</option>
-                                                    {extensionTypeName === 'executionListener' && (
-                                                        <>
-                                                            <option value="start">开始 (start)</option>
-                                                            <option value="end">结束 (end)</option>
-                                                            <option value="take">接收 (take)</option>
-                                                        </>
-                                                    )}
-                                                </select>
-                                            </div>
-
-                                            <div style={sidebarStyles.formGroup as React.CSSProperties}>
-                                                <label style={sidebarStyles.label as React.CSSProperties}>实现类型</label>
-                                                <select
-                                                    style={sidebarStyles.select as React.CSSProperties}
-                                                    value={extension.expression ? 'expression' : (extension.delegateExpression ? 'delegateExpression' : 'class')}
-                                                    onChange={(e) => {
-                                                        const type = e.target.value;
-                                                        // Clear previous implementation values
-                                                        const updatedExtension = { ...extension };
-                                                        delete updatedExtension.class;
-                                                        delete updatedExtension.expression;
-                                                        delete updatedExtension.delegateExpression;
-
-                                                        // Set default for new type
-                                                        if (type === 'class') {
-                                                            updatedExtension.class = 'com.example.Listener';
-                                                        } else if (type === 'expression') {
-                                                            updatedExtension.expression = '${expression}';
-                                                        } else if (type === 'delegateExpression') {
-                                                            updatedExtension.delegateExpression = '${delegateExpression}';
-                                                        }
-
-                                                        // Update all values at once
-                                                        const updatedValues = [...extensionElements];
-                                                        updatedValues[index] = updatedExtension;
-                                                        onPropertyChange('extensionElements', updatedValues);
-                                                    }}
-                                                >
-                                                    <option value="class">Java类</option>
-                                                    <option value="expression">表达式</option>
-                                                    <option value="delegateExpression">委托表达式</option>
-                                                </select>
-                                            </div>
-
-                                            {/* Implementation field based on type */}
-                                            {extension.class && (
-                                                <div style={sidebarStyles.formGroup as React.CSSProperties}>
-                                                    <label style={sidebarStyles.label as React.CSSProperties}>类名</label>
-                                                    <input
-                                                        style={sidebarStyles.input as React.CSSProperties}
-                                                        type="text"
-                                                        value={extension.class}
-                                                        onChange={(e) => updateExtensionElement(index, 'class', e.target.value)}
-                                                    />
-                                                </div>
-                                            )}
-
-                                            {extension.expression && (
-                                                <div style={sidebarStyles.formGroup as React.CSSProperties}>
-                                                    <label style={sidebarStyles.label as React.CSSProperties}>表达式</label>
-                                                    <input
-                                                        style={sidebarStyles.input as React.CSSProperties}
-                                                        type="text"
-                                                        value={extension.expression}
-                                                        onChange={(e) => updateExtensionElement(index, 'expression', e.target.value)}
-                                                    />
-                                                </div>
-                                            )}
-
-                                            {extension.delegateExpression && (
-                                                <div style={sidebarStyles.formGroup as React.CSSProperties}>
-                                                    <label style={sidebarStyles.label as React.CSSProperties}>委托表达式</label>
-                                                    <input
-                                                        style={sidebarStyles.input as React.CSSProperties}
-                                                        type="text"
-                                                        value={extension.delegateExpression}
-                                                        onChange={(e) => updateExtensionElement(index, 'delegateExpression', e.target.value)}
-                                                    />
-                                                </div>
-                                            )}
-                                        </>
-                                    )}
-
-                                    {/* Field extension */}
-                                    {extensionTypeName === 'field' && (
-                                        <>
-                                            <div style={sidebarStyles.formGroup as React.CSSProperties}>
-                                                <label style={sidebarStyles.label as React.CSSProperties}>字段名称</label>
-                                                <input
-                                                    style={sidebarStyles.input as React.CSSProperties}
-                                                    type="text"
-                                                    value={extension.name || ''}
-                                                    onChange={(e) => updateExtensionElement(index, 'name', e.target.value)}
-                                                />
-                                            </div>
-                                            <div style={sidebarStyles.formGroup as React.CSSProperties}>
-                                                <label style={sidebarStyles.label as React.CSSProperties}>字段值类型</label>
-                                                <select
-                                                    style={sidebarStyles.select as React.CSSProperties}
-                                                    value={extension.string ? 'string' : 'expression'}
-                                                    onChange={(e) => {
-                                                        const type = e.target.value;
-                                                        const updatedExtension = { ...extension };
-                                                        delete updatedExtension.string;
-                                                        delete updatedExtension.expression;
-
-                                                        if (type === 'string') {
-                                                            updatedExtension.string = 'value';
-                                                        } else {
-                                                            updatedExtension.expression = '${expression}';
-                                                        }
-
-                                                        const updatedValues = [...extensionElements];
-                                                        updatedValues[index] = updatedExtension;
-                                                        onPropertyChange('extensionElements', updatedValues);
-                                                    }}
-                                                >
-                                                    <option value="string">字符串</option>
-                                                    <option value="expression">表达式</option>
-                                                </select>
-                                            </div>
-
-                                            {extension.string !== undefined && (
-                                                <div style={sidebarStyles.formGroup as React.CSSProperties}>
-                                                    <label style={sidebarStyles.label as React.CSSProperties}>字符串值</label>
-                                                    <input
-                                                        style={sidebarStyles.input as React.CSSProperties}
-                                                        type="text"
-                                                        value={extension.string}
-                                                        onChange={(e) => updateExtensionElement(index, 'string', e.target.value)}
-                                                    />
-                                                </div>
-                                            )}
-
-                                            {extension.expression !== undefined && (
-                                                <div style={sidebarStyles.formGroup as React.CSSProperties}>
-                                                    <label style={sidebarStyles.label as React.CSSProperties}>表达式值</label>
-                                                    <input
-                                                        style={sidebarStyles.input as React.CSSProperties}
-                                                        type="text"
-                                                        value={extension.expression}
-                                                        onChange={(e) => updateExtensionElement(index, 'expression', e.target.value)}
-                                                    />
-                                                </div>
-                                            )}
-                                        </>
-                                    )}
-                                </div>
-                            );
-                        })}
-                    </div>
-                </>
-            )
-        }
-
-        // Gateway specific fields
-        if (nodeType.includes('gateway')) {
-            return (
-                <>
-                    {commonFields}
-                    {nodeType === 'exclusive-gateway' && (
-                        <div style={sidebarStyles.formGroup as React.CSSProperties}>
-                            <label style={sidebarStyles.label as React.CSSProperties}>默认流转</label>
-                            <input
-                                style={sidebarStyles.input as React.CSSProperties}
-                                type="text"
-                                value={data.default || ''}
-                                onChange={(e) => onPropertyChange('default', e.target.value)}
-                            />
-                        </div>
-                    )}
-                </>
-            )
-        }
-
-        // Sequence flow specific fields
-        if (nodeType === 'sequence-flow' || shape === 'bpmn-sequence-flow') {
-            return (
-                <>
-                    {commonFields}
-                    <div style={sidebarStyles.formGroup as React.CSSProperties}>
-                        <label style={sidebarStyles.label as React.CSSProperties}>条件表达式</label>
-                        <textarea
-                            style={{ ...sidebarStyles.input as React.CSSProperties, height: '80px' }}
-                            value={data.conditionExpression || ''}
-                            onChange={(e) => onPropertyChange('conditionExpression', e.target.value)}
-                        />
-                    </div>
-                </>
-            )
-        }
-
-        // Event specific fields
-        if (nodeType.includes('event')) {
-            let eventFields = commonFields;
-
-            // Timer event fields
-            if (nodeType.includes('timer')) {
-                eventFields = (
-                    <>
-                        {eventFields}
-                        <div style={sidebarStyles.formGroup as React.CSSProperties}>
-                            <label style={sidebarStyles.label as React.CSSProperties}>时间表达式</label>
-                            <input
-                                style={sidebarStyles.input as React.CSSProperties}
-                                type="text"
-                                value={data.timerDefinition || ''}
-                                onChange={(e) => onPropertyChange('timerDefinition', e.target.value)}
-                            />
-                        </div>
-                    </>
-                )
-            }
-
-            // Message event fields
-            if (nodeType.includes('message')) {
-                eventFields = (
-                    <>
-                        {eventFields}
-                        <div style={sidebarStyles.formGroup as React.CSSProperties}>
-                            <label style={sidebarStyles.label as React.CSSProperties}>消息名称</label>
-                            <input
-                                style={sidebarStyles.input as React.CSSProperties}
-                                type="text"
-                                value={data.messageRef || ''}
-                                onChange={(e) => onPropertyChange('messageRef', e.target.value)}
-                            />
-                        </div>
-                    </>
-                )
-            }
-
-            return eventFields;
-        }
-
-        if (nodeType === 'subprocess' || nodeType === 'call-activity') {
-            return (
-                <>
-                    {commonFields}
-                    {showMultiInstance && multiInstanceForm}
-                </>
-            );
-        }
-
-        // Default for any other node type
-        return commonFields;
-    };
-
-    return (
-        <div style={sidebarStyles.sidebar as React.CSSProperties}>
-            <h3>属性面板: {nodeType}</h3>
-            <form style={sidebarStyles.form as React.CSSProperties}>
-                {renderPropertyFields()}
-            </form>
-        </div>
-    )
-}
+import { PropertySidebar } from './components/PropertySidebar'
 
 const App: React.FC = () => {
     const containerRef = useRef<HTMLDivElement>(null)
@@ -671,6 +14,197 @@ const App: React.FC = () => {
     const [bpmnXml, setBpmnXml] = useState<string>('')
     const [status, setStatus] = useState<{ type: 'success' | 'error' | 'warning' | '', message: string }>({ type: '', message: '' })
     const [selectedNode, setSelectedNode] = useState<any>(null)
+    const [processConfig, setProcessConfig] = useState({
+        processId: 'Process_Demo',
+        processName: 'Demo Process',
+        isExecutable: true,
+        documentation: '',
+        executionListeners: [] as Array<{
+            $type: string;
+            event: string;
+            class?: string;
+            expression?: string;
+            delegateExpression?: string;
+        }>,
+        eventListeners: [] as Array<{
+            $type: string;
+            event: string;
+            class?: string;
+            expression?: string;
+            delegateExpression?: string;
+        }>,
+        dataObjects: [] as Array<{
+            id: string;
+            name: string;
+            itemSubjectRef?: string;
+            isCollection?: boolean;
+        }>,
+        extensionProperties: [] as Array<{
+            name: string;
+            value: string;
+        }>
+    });
+
+    // Global events state
+    const [globalEvents, setGlobalEvents] = useState({
+        messages: [] as Array<{ id: string; name: string; itemRef?: string }>,
+        errors: [] as Array<{ id: string; name: string; errorCode?: string; structureRef?: string }>,
+        signals: [] as Array<{ id: string; name: string; structureRef?: string }>,
+        escalations: [] as Array<{ id: string; name: string; escalationCode?: string; structureRef?: string }>
+    });
+
+    // Global events management functions
+    const addGlobalEvent = (type: 'messages' | 'errors' | 'signals' | 'escalations') => {
+        const newEvent = {
+            id: `${type.slice(0, -1)}_${Date.now()}`,
+            name: `New ${type.slice(0, -1)}`,
+            ...(type === 'errors' && { errorCode: '' }),
+            ...(type === 'escalations' && { escalationCode: '' }),
+            ...(type !== 'messages' && { structureRef: '' }),
+            ...(type === 'messages' && { itemRef: '' })
+        };
+
+        setGlobalEvents(prev => ({
+            ...prev,
+            [type]: [...prev[type], newEvent]
+        }));
+    };
+
+    const updateGlobalEvent = (type: 'messages' | 'errors' | 'signals' | 'escalations', index: number, field: string, value: string) => {
+        setGlobalEvents(prev => ({
+            ...prev,
+            [type]: prev[type].map((event, i) =>
+                i === index ? { ...event, [field]: value } : event
+            )
+        }));
+    };
+
+    const removeGlobalEvent = (type: 'messages' | 'errors' | 'signals' | 'escalations', index: number) => {
+        setGlobalEvents(prev => ({
+            ...prev,
+            [type]: prev[type].filter((_, i) => i !== index)
+        }));
+    };
+
+    // Process execution listeners management
+    const addExecutionListener = () => {
+        const newListener = {
+            $type: 'flowable:ExecutionListener',
+            event: 'start',
+            expression: '${expression}'
+        };
+
+        setProcessConfig(prev => ({
+            ...prev,
+            executionListeners: [...prev.executionListeners, newListener]
+        }));
+    };
+
+    const updateExecutionListener = (index: number, field: string, value: string) => {
+        setProcessConfig(prev => ({
+            ...prev,
+            executionListeners: prev.executionListeners.map((listener, i) =>
+                i === index ? { ...listener, [field]: value } : listener
+            )
+        }));
+    };
+
+    const removeExecutionListener = (index: number) => {
+        setProcessConfig(prev => ({
+            ...prev,
+            executionListeners: prev.executionListeners.filter((_, i) => i !== index)
+        }));
+    };
+
+    // Process event listeners management
+    const addEventListener = () => {
+        const newListener = {
+            $type: 'flowable:EventListener',
+            event: 'PROCESS_STARTED',
+            expression: '${expression}'
+        };
+
+        setProcessConfig(prev => ({
+            ...prev,
+            eventListeners: [...prev.eventListeners, newListener]
+        }));
+    };
+
+    const updateEventListener = (index: number, field: string, value: string) => {
+        setProcessConfig(prev => ({
+            ...prev,
+            eventListeners: prev.eventListeners.map((listener, i) =>
+                i === index ? { ...listener, [field]: value } : listener
+            )
+        }));
+    };
+
+    const removeEventListener = (index: number) => {
+        setProcessConfig(prev => ({
+            ...prev,
+            eventListeners: prev.eventListeners.filter((_, i) => i !== index)
+        }));
+    };
+
+    // Data objects management
+    const addDataObject = () => {
+        const newDataObject = {
+            id: `dataObject_${Date.now()}`,
+            name: 'New Data Object',
+            itemSubjectRef: '',
+            isCollection: false
+        };
+
+        setProcessConfig(prev => ({
+            ...prev,
+            dataObjects: [...prev.dataObjects, newDataObject]
+        }));
+    };
+
+    const updateDataObject = (index: number, field: string, value: string | boolean) => {
+        setProcessConfig(prev => ({
+            ...prev,
+            dataObjects: prev.dataObjects.map((dataObject, i) =>
+                i === index ? { ...dataObject, [field]: value } : dataObject
+            )
+        }));
+    };
+
+    const removeDataObject = (index: number) => {
+        setProcessConfig(prev => ({
+            ...prev,
+            dataObjects: prev.dataObjects.filter((_, i) => i !== index)
+        }));
+    };
+
+    // Extension properties management
+    const addExtensionProperty = () => {
+        const newProperty = {
+            name: 'propertyName',
+            value: 'propertyValue'
+        };
+
+        setProcessConfig(prev => ({
+            ...prev,
+            extensionProperties: [...prev.extensionProperties, newProperty]
+        }));
+    };
+
+    const updateExtensionProperty = (index: number, field: string, value: string) => {
+        setProcessConfig(prev => ({
+            ...prev,
+            extensionProperties: prev.extensionProperties.map((property, i) =>
+                i === index ? { ...property, [field]: value } : property
+            )
+        }));
+    };
+
+    const removeExtensionProperty = (index: number) => {
+        setProcessConfig(prev => ({
+            ...prev,
+            extensionProperties: prev.extensionProperties.filter((_, i) => i !== index)
+        }));
+    };
 
     useEffect(() => {
         if (!containerRef.current) return
@@ -1118,6 +652,15 @@ const App: React.FC = () => {
                 namespace: 'flowable',
                 includeDI: true,
                 format: true,
+                processId: processConfig.processId,
+                processName: processConfig.processName,
+                isExecutable: processConfig.isExecutable,
+                documentation: processConfig.documentation,
+                executionListeners: processConfig.executionListeners,
+                eventListeners: processConfig.eventListeners,
+                dataObjects: processConfig.dataObjects,
+                extensionProperties: processConfig.extensionProperties,
+                globalEvents: globalEvents,
             })
 
 
@@ -1147,6 +690,24 @@ const App: React.FC = () => {
             const result = await (graphRef.current as any).importFromBpmn(bpmnXml, {
                 namespace: 'flowable',
             })
+
+            // 如果导入结果包含全局事件，更新状态
+            if (result.data && result.data.globalEvents) {
+                setGlobalEvents(result.data.globalEvents);
+            }
+
+            // 如果导入结果包含流程属性，更新状态
+            if (result.data && result.data.processProperties) {
+                const props = result.data.processProperties;
+                setProcessConfig(prev => ({
+                    ...prev,
+                    documentation: props.documentation || '',
+                    executionListeners: props.executionListeners || [],
+                    eventListeners: props.eventListeners || [],
+                    dataObjects: props.dataObjects || [],
+                    extensionProperties: props.extensionProperties || []
+                }));
+            }
 
             setStatus({
                 type: 'success',
@@ -1191,15 +752,21 @@ const App: React.FC = () => {
                 data: (edge as any).getData?.() || {}
             }))
 
-            const graphData = { nodes, edges }
+            const graphData = { nodes, edges, globalEvents }
 
             // 使用静态方法导出
             const result = await BpmnExport.toBpmn(graphData, {
                 namespace: 'flowable',
                 includeDI: true,
                 format: true,
-                processId: 'Process_Static',
-                processName: 'Static Export Process',
+                processId: processConfig.processId,
+                processName: processConfig.processName,
+                isExecutable: processConfig.isExecutable,
+                documentation: processConfig.documentation,
+                executionListeners: processConfig.executionListeners,
+                eventListeners: processConfig.eventListeners,
+                dataObjects: processConfig.dataObjects,
+                extensionProperties: processConfig.extensionProperties,
             })
 
             setBpmnXml(result.data as string)
@@ -1293,6 +860,27 @@ const App: React.FC = () => {
                 <PropertySidebar
                     selectedNode={selectedNode}
                     onPropertyChange={handlePropertyChange}
+                    processConfig={processConfig}
+                    onProcessChange={(key: string, value: any) => {
+                        setProcessConfig(prev => ({ ...prev, [key]: value }))
+                        console.log('Process config updated', processConfig)
+                    }}
+                    globalEvents={globalEvents}
+                    onGlobalEventAdd={addGlobalEvent}
+                    onGlobalEventUpdate={updateGlobalEvent}
+                    onGlobalEventRemove={removeGlobalEvent}
+                    onExecutionListenerAdd={addExecutionListener}
+                    onExecutionListenerUpdate={updateExecutionListener}
+                    onExecutionListenerRemove={removeExecutionListener}
+                    onEventListenerAdd={addEventListener}
+                    onEventListenerUpdate={updateEventListener}
+                    onEventListenerRemove={removeEventListener}
+                    onDataObjectAdd={addDataObject}
+                    onDataObjectUpdate={updateDataObject}
+                    onDataObjectRemove={removeDataObject}
+                    onExtensionPropertyAdd={addExtensionProperty}
+                    onExtensionPropertyUpdate={updateExtensionProperty}
+                    onExtensionPropertyRemove={removeExtensionProperty}
                 />
             </div>
 

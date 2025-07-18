@@ -18,7 +18,6 @@ import {
 import { defaultOptions, NAMESPACE_URIS } from './config';
 import { DEFAULT_NODE_MAPPINGS, DEFAULT_BPMN_TO_X6_MAPPINGS } from './mappings';
 import { generateId, sanitizeXMLId } from './utils';
-import { propertyHandlers } from './property-handlers';
 // import BpmnPackage from './json/bpmn.json' with { type: 'json' };
 
 
@@ -122,7 +121,7 @@ export class BpmnConverter {
      * Build BPMN definitions from X6 graph data
      */
     private buildBpmnDefinitions(graphData: X6GraphData): any {
-        const { nodes, edges } = graphData;
+        const { nodes, edges, globalEvents } = graphData;
 
         // 创建根定义
         const definitions = this.moddle.create('bpmn:Definitions', {
@@ -145,18 +144,106 @@ export class BpmnConverter {
         const process = this.moddle.create('bpmn:Process', {
             id: this.options.processId,
             name: this.options.processName,
-            isExecutable: true
+            isExecutable: this.options.isExecutable ?? true
         });
+
+        // 添加流程文档
+        if (this.options.documentation) {
+            const documentation = this.moddle.create('bpmn:Documentation', {
+                text: this.options.documentation
+            });
+            process.documentation = [documentation];
+        }
+
+        // 添加流程级监听器
+        const allListeners = [];
+        console.log(this.options.namespace, '-----');
+        // 添加执行监听器
+        if (this.options.executionListeners && this.options.executionListeners.length > 0) {
+            const executionListeners = this.options.executionListeners.map(listener => {
+                const listenerElement = this.moddle.createAny('executionListener', NAMESPACE_URIS[this.options.namespace], {
+                    event: listener.event
+                });
+
+                if (listener.class) {
+                    listenerElement.class = listener.class;
+                } else if (listener.expression) {
+                    listenerElement.expression = listener.expression;
+                } else if (listener.delegateExpression) {
+                    listenerElement.delegateExpression = listener.delegateExpression;
+                }
+
+                return listenerElement;
+            });
+            allListeners.push(...executionListeners);
+        }
+
+        // 添加事件监听器
+        if (this.options.eventListeners && this.options.eventListeners.length > 0) {
+            const eventListeners = this.options.eventListeners.map(listener => {
+                const listenerElement = this.moddle.createAny('eventListener', NAMESPACE_URIS[this.options.namespace], {
+                    event: listener.event
+                });
+
+                if (listener.class) {
+                    listenerElement.class = listener.class;
+                } else if (listener.expression) {
+                    listenerElement.expression = listener.expression;
+                } else if (listener.delegateExpression) {
+                    listenerElement.delegateExpression = listener.delegateExpression;
+                }
+
+                return listenerElement;
+            });
+            allListeners.push(...eventListeners);
+        }
+
+        if (allListeners.length > 0) {
+            const extensionElements = this.moddle.create('bpmn:ExtensionElements');
+            extensionElements.values = allListeners;
+            process.extensionElements = extensionElements;
+        }
+
+        // 添加扩展属性
+        if (this.options.extensionProperties && this.options.extensionProperties.length > 0) {
+            if (!process.extensionElements) {
+                process.extensionElements = this.moddle.create('bpmn:ExtensionElements');
+                process.extensionElements.values = [];
+            }
+
+            // 创建Properties容器
+            const properties = this.moddle.createAny('properties', NAMESPACE_URIS[this.options.namespace]);
+
+            // 创建每个Property元素
+            const propertyElements = this.options.extensionProperties.map(prop => {
+                return this.moddle.createAny('property', NAMESPACE_URIS[this.options.namespace], {
+                    id: `Property_${Math.random().toString(36).substring(2, 11)}`,
+                    name: prop.name,
+                    value: prop.value
+                });
+            });
+
+            // 设置Properties的property属性为Property元素数组
+            properties.$children = propertyElements;
+
+            process.extensionElements.values.push(properties);
+        }
 
         // 转换节点到BPMN元素
         const bpmnElements = nodes.map(node => this.convertNodeToBpmn(node));
         const bpmnFlows = edges.map(edge => this.convertEdgeToBpmn(edge));
 
-        // 添加元素到流程
-        process.flowElements = [...bpmnElements, ...bpmnFlows];
+        // 添加数据对象
+        const dataObjects = this.createDataObjects();
 
-        // 添加流程到定义
-        definitions.rootElements = [process];
+        // 添加元素到流程
+        process.flowElements = [...bpmnElements, ...bpmnFlows, ...dataObjects];
+
+        // 创建全局事件定义
+        const globalEventElements = this.createGlobalEventElements(globalEvents);
+
+        // 添加流程和全局事件到定义
+        definitions.rootElements = [process, ...globalEventElements];
         console.log('definitions', definitions);
         // 如果需要，添加图形信息
         if (this.options.includeDI) {
@@ -171,7 +258,10 @@ export class BpmnConverter {
      * Convert X6 node to BPMN element
      */
     private convertNodeToBpmn(node: X6NodeData): any {
-        const { shape, data = {}, id } = node;
+        const { shape, data = {} } = node;
+
+        // 把 extensionElements、documentation、extensionProperties 与其它属性分离，避免直接展开导致序列化错误
+        const { extensionElements: rawExtensions, loopCharacteristics, documentation, extensionProperties, ...otherData } = data;
 
         // 检查自定义转换器
         if (shape && this.nodeConverters.has(shape)) {
@@ -180,40 +270,64 @@ export class BpmnConverter {
 
         // 使用默认映射
         const bpmnType = this.getBpmnTypeFromX6Shape(shape || '');
-        const elementId = sanitizeXMLId(id);
+        const elementId = sanitizeXMLId(node.id);
 
-        const baseAttrs: { [key: string]: any } = {
+        // 创建BPMN元素
+        const element = this.moddle.create(bpmnType, {
             id: elementId,
-            name: data.name || node.label || ''
-        };
-        const complexProps: { [key: string]: any } = {};
+            name: data.name || node.label || '',
+            ...otherData
+        });
 
-        // 遍历所有数据属性
-        for (const key in data) {
-            if (Object.prototype.hasOwnProperty.call(data, key)) {
-                const value = data[key];
+        // 处理文档
+        if (documentation && documentation.trim()) {
+            const documentationElement = this.moddle.create('bpmn:Documentation', {
+                text: documentation
+            });
+            element.documentation = [documentationElement];
+        }
 
-                // 检查当前属性是否在我们的特殊处理器中
-                if (propertyHandlers[key]) {
-                    // 如果是，则调用对应的函数创建复杂对象
-                    if (value !== undefined && value !== null) {
-                        complexProps[key] = propertyHandlers[key](this.moddle, value);
-                    }
-                } else if (key !== 'name') { // 'name' has been handled
-                    // 如果不是，则作为简单属性处理
-                    baseAttrs[key] = value;
-                }
+        // 处理扩展元素和扩展属性
+        const extensionElementsValues = [];
+
+        // 添加原有的扩展元素
+        if (rawExtensions && Array.isArray(rawExtensions) && rawExtensions.length) {
+            const moddleExtensions = this.createModdleExtensionElements(rawExtensions);
+            if (moddleExtensions && moddleExtensions.values) {
+                extensionElementsValues.push(...moddleExtensions.values);
             }
         }
 
-        // 添加引擎特定属性, these are simple attributes
-        this.addEngineSpecificAttributes(baseAttrs, data);
+        // 添加扩展属性
+        if (extensionProperties && Array.isArray(extensionProperties) && extensionProperties.length > 0) {
+            const properties = this.moddle.createAny('Properties', NAMESPACE_URIS[this.options.namespace]);
 
-        // 1. 先用简单属性创建主元素
-        const element = this.moddle.create(bpmnType, baseAttrs);
+            const propertyElements = extensionProperties.map((prop: any) => {
+                return this.moddle.createAny('Property', NAMESPACE_URIS[this.options.namespace], {
+                    id: `Property_${Math.random().toString(36).substring(2, 11)}`,
+                    name: prop.name,
+                    value: prop.value
+                });
+            });
 
-        // 2. 将创建好的复杂对象赋值给主元素
-        Object.assign(element, complexProps);
+            properties.$children = propertyElements;
+            extensionElementsValues.push(properties);
+        }
+
+        // 如果有扩展元素，创建extensionElements
+        if (extensionElementsValues.length > 0) {
+            element.extensionElements = this.moddle.create('bpmn:ExtensionElements');
+            element.extensionElements.values = extensionElementsValues;
+        }
+
+        // 处理循环特性
+        if (loopCharacteristics) {
+            element.loopCharacteristics = this.createModdleLoopCharacteristics(loopCharacteristics);
+            // console.log('element.loopCharacteristics', element.loopCharacteristics);
+        }
+
+        // 添加引擎特定属性
+        this.addEngineSpecificAttributes(element, otherData);
 
         return element;
     }
@@ -222,38 +336,35 @@ export class BpmnConverter {
      * Convert X6 edge to BPMN sequence flow
      */
     private convertEdgeToBpmn(edge: X6EdgeData): any {
-        const { data = {}, id, source, target, shape, label } = edge;
+        const { data = {} } = edge;
+
+        const { extensionElements: rawExtensions, ...otherData } = data;
 
         // 检查自定义转换器
-        if (shape && this.edgeConverters.has(shape)) {
-            return this.edgeConverters.get(shape)!.toBpmn(edge, this.moddle);
-        }
-
-        const baseAttrs: { [key: string]: any } = {
-            id: sanitizeXMLId(id),
-            name: data.name || label || '',
-            sourceRef: { id: source }, // In X6, source/target are node IDs (strings)
-            targetRef: { id: target }
-        };
-        const complexProps: { [key: string]: any } = {};
-
-        for (const key in data) {
-            if (Object.prototype.hasOwnProperty.call(data, key)) {
-                const value = data[key];
-
-                if (propertyHandlers[key]) {
-                    if (value !== undefined && value !== null) {
-                        complexProps[key] = propertyHandlers[key](this.moddle, value);
-                    }
-                } else if (key !== 'name') {
-                    baseAttrs[key] = value;
-                }
-            }
+        if (edge.shape && this.edgeConverters.has(edge.shape)) {
+            return this.edgeConverters.get(edge.shape)!.toBpmn(edge, this.moddle);
         }
 
         // 创建序列流
-        const sequenceFlow = this.moddle.create('bpmn:SequenceFlow', baseAttrs);
-        Object.assign(sequenceFlow, complexProps);
+        const sequenceFlow = this.moddle.create('bpmn:SequenceFlow', {
+            id: sanitizeXMLId(edge.id),
+            name: data.name || edge.label || '',
+            sourceRef: { id: edge.source },
+            targetRef: { id: edge.target }
+        });
+        console.log('sequenceFlow', edge.source, edge.target);
+
+        // 添加条件表达式
+        if (otherData.conditionExpression) {
+            sequenceFlow.conditionExpression = this.moddle.create('bpmn:FormalExpression', {
+                body: otherData.conditionExpression
+            });
+        }
+
+        // 处理扩展元素
+        if (rawExtensions && Array.isArray(rawExtensions) && rawExtensions.length) {
+            sequenceFlow.extensionElements = this.createModdleExtensionElements(rawExtensions);
+        }
 
         return sequenceFlow;
     }
@@ -265,241 +376,663 @@ export class BpmnConverter {
         const nodes: X6NodeData[] = [];
         const edges: X6EdgeData[] = [];
 
-        if (!definitions.diagrams || !definitions.diagrams.length) {
-            console.warn('No BPMNDiagram found in definitions.');
+        // 获取第一个流程
+        const process = definitions.rootElements?.find((el: any) => el.$type === 'bpmn:Process');
+        if (!process) {
             return { nodes, edges };
         }
 
-        const diagram = definitions.diagrams[0];
-        const plane = diagram.plane;
-        const process = definitions.rootElements.find((el: any) => el.$type === 'bpmn:Process');
-
-        if (!plane || !plane.planeElement) {
-            console.warn('No BPMNPlane or plane elements found.');
-            return { nodes, edges };
-        }
-
+        // 获取图形信息映射
         const diMap = this.buildDiagramElementMap(definitions);
 
-        // First pass: convert nodes
-        process.flowElements.forEach((element: any) => {
-            if (element.$type !== 'bpmn:SequenceFlow') {
-                const node = this.convertBpmnToNode(element, diMap);
-                if (node) {
-                    nodes.push(node);
-                }
-            }
-        });
-
-        // Second pass: convert edges
-        process.flowElements.forEach((element: any) => {
+        // 处理流程元素
+        process.flowElements?.forEach((element: any) => {
             if (element.$type === 'bpmn:SequenceFlow') {
                 const edge = this.convertBpmnToEdge(element, diMap);
-                if (edge) {
-                    edges.push(edge);
-                }
+                if (edge) edges.push(edge);
+            } else {
+                const node = this.convertBpmnToNode(element, diMap);
+                if (node) nodes.push(node);
             }
         });
+        console.log('edges', edges);
 
-        return { nodes, edges };
+        // 提取全局事件
+        const globalEvents = this.extractGlobalEvents(definitions);
+
+        // 提取流程级属性
+        const processProperties = this.extractProcessProperties(process);
+
+        return { nodes, edges, globalEvents, processProperties };
     }
 
+    /**
+     * Convert BPMN element to X6 node
+     */
     private convertBpmnToNode(element: any, diMap: Map<string, any>): X6NodeData | null {
-        const di = diMap.get(element.id);
-        if (!di || !di.bounds) {
-            return null;
+        const bpmnType = element.$type.replace('bpmn:', '');
+        const x6Shape = this.getX6ShapeFromBpmnType(bpmnType);
+
+        // 获取图形信息
+        const diElement = diMap.get(element.id);
+        console.log('element', element);
+        const bounds = diElement?.bounds || { x: 0, y: 0, width: 100, height: 80 };
+
+        // 检查自定义转换器
+        if (this.nodeConverters.has(x6Shape)) {
+            const converter = this.nodeConverters.get(x6Shape)!;
+            const converted = converter.fromBpmn(element, this.moddle);
+            return {
+                id: element.id,
+                shape: x6Shape,
+                x: bounds.x,
+                y: bounds.y,
+                width: bounds.width,
+                height: bounds.height,
+                ...converted
+            };
         }
 
-        const shape = this.getX6ShapeFromBpmnType(element.$type);
-        const bounds = di.bounds as BpmnElementBounds;
-        const data = this.extractEngineSpecificData(element);
+        // 提取文档
+        let documentation = '';
+        if (element.documentation && element.documentation.length > 0) {
+            documentation = element.documentation[0].text || '';
+        }
 
-        // 提取扩展元素
+        // 提取扩展属性
+        let extensionProperties: any[] = [];
         if (element.extensionElements && element.extensionElements.values) {
-            data.extensionElements = element.extensionElements.values.map((ext: any) => {
-                const plainObject: any = { $type: ext.$type };
-                Object.keys(ext.$descriptor.propertiesByName).forEach(key => {
-                    if (key !== '$type') {
-                        plainObject[key] = ext[key];
+            element.extensionElements.values.forEach((ext: any) => {
+                if (ext.$type === 'flowable:Properties' ||
+                    ext.$type === 'camunda:Properties' ||
+                    ext.$type === 'activiti:Properties') {
+                    if (ext.property && Array.isArray(ext.property)) {
+                        ext.property.forEach((prop: any) => {
+                            extensionProperties.push({
+                                name: prop.name,
+                                value: prop.value
+                            });
+                        });
                     }
-                });
-                return plainObject;
+                }
             });
         }
 
-        return {
+        // 默认转换
+        const node: X6NodeData = {
             id: element.id,
-            shape,
+            shape: x6Shape,
             x: bounds.x,
             y: bounds.y,
             width: bounds.width,
             height: bounds.height,
-            label: element.name,
             data: {
-                ...data,
-                name: element.name
-            }
+                name: element.name,
+                documentation: documentation,
+                extensionProperties: extensionProperties,
+                // 提取引擎特定属性
+                ...this.extractEngineSpecificData(element)
+            },
+            label: element.name
         };
+
+        return node;
     }
-
-    private convertBpmnToEdge(sequenceFlow: any, diMap: Map<string, any>): X6EdgeData | null {
-        const di = diMap.get(sequenceFlow.id);
-        if (!di) {
-            return null;
-        }
-
-        const sourceId = sequenceFlow.sourceRef.id;
-        const targetId = sequenceFlow.targetRef.id;
-
-        return {
-            id: sequenceFlow.id,
-            source: sourceId,
-            target: targetId,
-            label: sequenceFlow.name,
-            data: {
-                name: sequenceFlow.name,
-                conditionExpression: sequenceFlow.conditionExpression?.body
-            }
-        };
-    }
-
 
     /**
-     * Build BPMN diagram from X6 data and process ID
+     * Convert BPMN sequence flow to X6 edge
+     */
+    private convertBpmnToEdge(sequenceFlow: any, diMap: Map<string, any>): X6EdgeData | null {
+        const edge: X6EdgeData = {
+            id: sequenceFlow.id,
+            source: sequenceFlow.sourceRef.id,
+            target: sequenceFlow.targetRef.id,
+            shape: 'edge',
+            data: {
+                name: sequenceFlow.name
+            },
+            label: sequenceFlow.name
+        };
+
+        // 添加条件表达式
+        if (sequenceFlow.conditionExpression) {
+            edge.data!.conditionExpression = sequenceFlow.conditionExpression.body;
+        }
+
+        return edge;
+    }
+
+    /**
+     * Build BPMN diagram information
      */
     private buildBpmnDiagram(nodes: X6NodeData[], edges: X6EdgeData[], processId: string): any {
-        const planeId = generateId('BPMNPlane');
+        const diagram = this.moddle.create('bpmndi:BPMNDiagram', {
+            id: generateId('BPMNDiagram')
+        });
 
-        // 创建图形元素
-        const diagramElements = nodes.map(node => {
-            return this.moddle.create('bpmndi:BPMNShape', {
-                id: sanitizeXMLId(`${node.id}_di`),
-                bpmnElement: { id: node.id },
-                bounds: this.moddle.create('dc:Bounds', {
-                    x: node.x,
-                    y: node.y,
-                    width: node.width,
-                    height: node.height
-                })
+        const plane = this.moddle.create('bpmndi:BPMNPlane', {
+            id: generateId('BPMNPlane'),
+            bpmnElement: { id: processId }
+        });
+
+        // 创建节点图形信息
+        const shapes = nodes.map(node => {
+            const shape = this.moddle.create('bpmndi:BPMNShape', {
+                id: generateId('BPMNShape'),
+                bpmnElement: { id: node.id }
             });
-        }).concat(edges.map(edge => {
+
+            shape.bounds = this.moddle.create('dc:Bounds', {
+                x: node.x || 0,
+                y: node.y || 0,
+                width: node.width || 100,
+                height: node.height || 80
+            });
+
+            return shape;
+        });
+
+        // 创建边图形信息
+        const edgeShapes = edges.map(edge => {
             const sourceNode = nodes.find(n => n.id === edge.source);
             const targetNode = nodes.find(n => n.id === edge.target);
 
-            if (!sourceNode || !targetNode) {
-                console.warn(`Could not find source or target node for edge ${edge.id}`);
-                return null;
+            const edgeShape = this.moddle.create('bpmndi:BPMNEdge', {
+                id: generateId('BPMNEdge'),
+                bpmnElement: { id: edge.id }
+            });
+
+            // 生成路径点
+            if (sourceNode && targetNode) {
+                const waypoints = this.generateWaypoints(sourceNode, targetNode);
+                edgeShape.waypoint = waypoints.map(wp =>
+                    // this.moddle.create('di:waypoint', wp)
+                    this.moddle.create('dc:Point', wp)
+                );
             }
 
-            const waypoints = this.generateWaypoints(sourceNode, targetNode);
-
-            return this.moddle.create('bpmndi:BPMNEdge', {
-                id: sanitizeXMLId(`${edge.id}_di`),
-                bpmnElement: { id: edge.id },
-                waypoint: waypoints.map(wp => this.moddle.create('dc:Point', wp))
-            });
-        }).filter(Boolean));
-
-        // 创建BPMNPlane
-        const plane = this.moddle.create('bpmndi:BPMNPlane', {
-            id: planeId,
-            bpmnElement: { id: processId },
-            planeElement: diagramElements
+            return edgeShape;
         });
 
-        // 创建BPMNDiagram
-        return this.moddle.create('bpmndi:BPMNDiagram', {
-            id: generateId('BPMNDiagram'),
-            plane: plane
-        });
-    }
+        plane.planeElement = [...shapes, ...edgeShapes];
+        diagram.plane = plane;
 
-    private buildDiagramElementMap(definitions: any): Map<string, any> {
-        const map = new Map<string, any>();
-        if (definitions.diagrams && definitions.diagrams.length) {
-            definitions.diagrams[0].plane.planeElement.forEach((el: any) => {
-                if (el.bpmnElement) {
-                    map.set(el.bpmnElement.id, el);
-                }
-            });
-        }
-        return map;
+        return diagram;
     }
 
     /**
-     * Generate simple straight-line waypoints
+     * Build diagram element map for position information
+     */
+    private buildDiagramElementMap(definitions: any): Map<string, any> {
+        const diMap = new Map();
+
+        const diagram = definitions.diagrams?.[0];
+        if (!diagram?.plane?.planeElement) {
+            return diMap;
+        }
+
+        diagram.plane.planeElement.forEach((element: any) => {
+            if (element.bpmnElement) {
+                diMap.set(element.bpmnElement.id, {
+                    bounds: element.bounds ? {
+                        x: element.bounds.x,
+                        y: element.bounds.y,
+                        width: element.bounds.width,
+                        height: element.bounds.height
+                    } : null,
+                    waypoints: element.waypoint?.map((wp: any) => ({
+                        x: wp.x,
+                        y: wp.y
+                    })) || []
+                });
+            }
+        });
+
+        return diMap;
+    }
+
+    /**
+     * Generate waypoints for sequence flow
      */
     private generateWaypoints(source: X6NodeData, target: X6NodeData): BpmnWaypoint[] {
+        const sourceX = (source.x || 0) + (source.width || 100) / 2;
+        const sourceY = (source.y || 0) + (source.height || 80) / 2;
+        const targetX = (target.x || 0) + (target.width || 100) / 2;
+        const targetY = (target.y || 0) + (target.height || 80) / 2;
+
         return [
-            { x: source.x! + source.width! / 2, y: source.y! + source.height! / 2 },
-            { x: target.x! + target.width! / 2, y: target.y! + target.height! / 2 }
+            { x: sourceX, y: sourceY },
+            { x: targetX, y: targetY }
         ];
     }
 
+    /**
+     * Get BPMN type from X6 shape
+     */
     private getBpmnTypeFromX6Shape(shape: string): string {
-        return DEFAULT_NODE_MAPPINGS[shape] || 'bpmn:Task'; // 默认为Task
+        const customMapping = this.options.nodeTypeMappings[shape];
+        if (customMapping) return customMapping;
+
+        return DEFAULT_NODE_MAPPINGS[shape] || 'bpmn:Task';
     }
 
+    /**
+     * Get X6 shape from BPMN type
+     */
     private getX6ShapeFromBpmnType(bpmnType: string): string {
-        return DEFAULT_BPMN_TO_X6_MAPPINGS[bpmnType] || 'bpmn-base-node'; // 默认形状
+        return DEFAULT_BPMN_TO_X6_MAPPINGS[bpmnType] || `bpmn-${bpmnType.toLowerCase()}`;
     }
 
+    /**
+     * Add engine-specific attributes to BPMN element
+     */
     private addEngineSpecificAttributes(element: any, data: any): void {
-        Object.keys(data).forEach(key => {
-            if (key.includes(':')) {
-                const [prefix, localName] = key.split(':');
-                const uri = NAMESPACE_URIS[prefix as keyof typeof NAMESPACE_URIS];
-                if (uri) {
-                    element.$attrs = element.$attrs || {};
-                    element.$attrs[`${prefix}:${localName}`] = data[key];
-                }
-            }
-        });
-    }
+        const namespace = this.options.namespace;
 
-    private extractEngineSpecificData(element: any): any {
-        const data: any = {};
-        if (element.$attrs) {
-            Object.keys(element.$attrs).forEach(key => {
-                if (key.includes(':')) {
-                    data[key] = element.$attrs[key];
+        if (namespace === 'flowable' && data.flowable) {
+            Object.keys(data.flowable).forEach(key => {
+                if (data.flowable[key] !== undefined) {
+                    element[`flowable:${key}`] = data.flowable[key];
                 }
             });
         }
+
+        if (namespace === 'camunda' && data.camunda) {
+            Object.keys(data.camunda).forEach(key => {
+                if (data.camunda[key] !== undefined) {
+                    element[`camunda:${key}`] = data.camunda[key];
+                }
+            });
+        }
+
+        if (namespace === 'activiti' && data.activiti) {
+            Object.keys(data.activiti).forEach(key => {
+                if (data.activiti[key] !== undefined) {
+                    element[`activiti:${key}`] = data.activiti[key];
+                }
+            });
+        }
+    }
+
+    /**
+     * Extract engine-specific data from BPMN element
+     */
+    private extractEngineSpecificData(element: any): any {
+        const data: any = {};
+        const namespace = this.options.namespace;
+
+        // 提取所有属性
+        Object.keys(element).forEach(key => {
+            if (key.startsWith(`${namespace}:`)) {
+                if (!data[namespace]) data[namespace] = {};
+                const propName = key.substring(namespace.length + 1);
+                data[namespace][propName] = element[key];
+            }
+        });
+
         return data;
     }
 
+    /**
+     * Validate BPMN definitions and return warnings
+     */
     private validateBpmnDefinitions(definitions: any): string[] {
         const warnings: string[] = [];
 
+        // 验证必要元素
+        if (!definitions.targetNamespace) {
+            warnings.push('Missing targetNamespace in definitions');
+        }
+
         if (!definitions.rootElements || definitions.rootElements.length === 0) {
-            warnings.push('No root elements found in definitions.');
-            return warnings;
+            warnings.push('No process elements found in definitions');
         }
 
-        const process = definitions.rootElements.find((el: any) => el.$type === 'bpmn:Process');
-        if (!process) {
-            warnings.push('No process found in definitions.');
-            return warnings;
-        }
-
-        return [...warnings, ...this.validateProcess(process)];
-    }
-
-    private validateProcess(process: any): string[] {
-        const warnings: string[] = [];
-        const elementIds = new Set<string>();
-
-        if (process && process.flowElements) {
-            for (const element of process.flowElements) {
-                if (element.id && elementIds.has(element.id)) {
-                    warnings.push(`Duplicate ID found: ${element.id}`);
-                }
-                if (element.id) {
-                    elementIds.add(element.id);
-                }
+        // 验证流程结构
+        definitions.rootElements?.forEach((element: any) => {
+            if (element.$type === 'bpmn:Process') {
+                const processWarnings = this.validateProcess(element);
+                warnings.push(...processWarnings);
             }
-        }
+        });
+
         return warnings;
     }
-} 
+
+    /**
+     * Validate individual process element
+     */
+    private validateProcess(process: any): string[] {
+        const warnings: string[] = [];
+        const flowElements = process.flowElements || [];
+
+        // 检查开始事件
+        const startEvents = flowElements.filter((el: any) =>
+            el.$type === 'bpmn:StartEvent'
+        );
+        if (startEvents.length === 0) {
+            warnings.push(`Process ${process.id} has no start event`);
+        }
+
+        // 检查结束事件
+        const endEvents = flowElements.filter((el: any) =>
+            el.$type === 'bpmn:EndEvent'
+        );
+        if (endEvents.length === 0) {
+            warnings.push(`Process ${process.id} has no end event`);
+        }
+
+        return warnings;
+    }
+
+    /**
+     * 根据原始对象数组创建 bpmn:ExtensionElements 容器
+     */
+    private createModdleExtensionElements(rawExtensions: any[]): any {
+        const extContainer = this.moddle.create('bpmn:ExtensionElements');
+
+        extContainer.values = rawExtensions.map((raw: any) => {
+            const { $type, ...attrs } = raw || {};
+
+            if (!$type) {
+                // 如果缺少类型信息，直接创建通用元素
+                return this.moddle.createAny('undefined:Undefined', undefined, attrs);
+            }
+
+            const [prefix] = $type.split(':');
+            const uri = (NAMESPACE_URIS as any)[prefix];
+
+            // 使用 createAny 以避免缺少 descriptor 时序列化失败
+            return this.moddle.createAny($type, uri, attrs);
+        });
+
+        return extContainer;
+    }
+
+    private createModdleLoopCharacteristics(data: any): any {
+        const loopCharacteristics = data;
+        if (!loopCharacteristics) {
+            return null;
+        }
+
+        const moddleLoopCharacteristics = this.moddle.create('bpmn:MultiInstanceLoopCharacteristics', loopCharacteristics);
+
+        if (loopCharacteristics.completionCondition) {
+            moddleLoopCharacteristics.completionCondition = this.moddle.create('bpmn:Expression', {
+                body: loopCharacteristics.completionCondition,
+            });
+        }
+
+        if (loopCharacteristics.loopCardinality) {
+            moddleLoopCharacteristics.loopCardinality = this.moddle.create('bpmn:Expression', {
+                body: loopCharacteristics.loopCardinality,
+            });
+        }
+
+        return moddleLoopCharacteristics;
+    }
+
+    /**
+     * Create global event elements from global events data
+     */
+    private createGlobalEventElements(globalEvents: any): any[] {
+        const elements: any[] = [];
+
+        if (!globalEvents) {
+            return elements;
+        }
+
+        // Create Message elements
+        if (globalEvents.messages && Array.isArray(globalEvents.messages)) {
+            globalEvents.messages.forEach((message: any) => {
+                const messageElement = this.moddle.create('bpmn:Message', {
+                    id: sanitizeXMLId(message.id),
+                    name: message.name
+                });
+
+                if (message.itemRef) {
+                    messageElement.itemRef = { id: message.itemRef };
+                }
+
+                elements.push(messageElement);
+            });
+        }
+
+        // Create Error elements
+        if (globalEvents.errors && Array.isArray(globalEvents.errors)) {
+            globalEvents.errors.forEach((error: any) => {
+                const errorElement = this.moddle.create('bpmn:Error', {
+                    id: sanitizeXMLId(error.id),
+                    name: error.name
+                });
+
+                if (error.errorCode) {
+                    errorElement.errorCode = error.errorCode;
+                }
+
+                if (error.structureRef) {
+                    errorElement.structureRef = { id: error.structureRef };
+                }
+
+                elements.push(errorElement);
+            });
+        }
+
+        // Create Signal elements
+        if (globalEvents.signals && Array.isArray(globalEvents.signals)) {
+            globalEvents.signals.forEach((signal: any) => {
+                const signalElement = this.moddle.create('bpmn:Signal', {
+                    id: sanitizeXMLId(signal.id),
+                    name: signal.name
+                });
+
+                if (signal.structureRef) {
+                    signalElement.structureRef = { id: signal.structureRef };
+                }
+
+                elements.push(signalElement);
+            });
+        }
+
+        // Create Escalation elements
+        if (globalEvents.escalations && Array.isArray(globalEvents.escalations)) {
+            globalEvents.escalations.forEach((escalation: any) => {
+                const escalationElement = this.moddle.create('bpmn:Escalation', {
+                    id: sanitizeXMLId(escalation.id),
+                    name: escalation.name
+                });
+
+                if (escalation.escalationCode) {
+                    escalationElement.escalationCode = escalation.escalationCode;
+                }
+
+                if (escalation.structureRef) {
+                    escalationElement.structureRef = { id: escalation.structureRef };
+                }
+
+                elements.push(escalationElement);
+            });
+        }
+
+        return elements;
+    }
+
+    /**
+     * Extract global events from BPMN definitions
+     */
+    private extractGlobalEvents(definitions: any): any {
+        const globalEvents = {
+            messages: [] as any[],
+            errors: [] as any[],
+            signals: [] as any[],
+            escalations: [] as any[]
+        };
+
+        if (!definitions.rootElements) {
+            return globalEvents;
+        }
+
+        definitions.rootElements.forEach((element: any) => {
+            switch (element.$type) {
+                case 'bpmn:Message':
+                    globalEvents.messages.push({
+                        id: element.id,
+                        name: element.name || '',
+                        itemRef: element.itemRef?.id || ''
+                    });
+                    break;
+
+                case 'bpmn:Error':
+                    globalEvents.errors.push({
+                        id: element.id,
+                        name: element.name || '',
+                        errorCode: element.errorCode || '',
+                        structureRef: element.structureRef?.id || ''
+                    });
+                    break;
+
+                case 'bpmn:Signal':
+                    globalEvents.signals.push({
+                        id: element.id,
+                        name: element.name || '',
+                        structureRef: element.structureRef?.id || ''
+                    });
+                    break;
+
+                case 'bpmn:Escalation':
+                    globalEvents.escalations.push({
+                        id: element.id,
+                        name: element.name || '',
+                        escalationCode: element.escalationCode || '',
+                        structureRef: element.structureRef?.id || ''
+                    });
+                    break;
+            }
+        });
+
+        return globalEvents;
+    }
+
+    /**
+     * Create data objects from options
+     */
+    private createDataObjects(): any[] {
+        const dataObjects: any[] = [];
+
+        if (!this.options.dataObjects || this.options.dataObjects.length === 0) {
+            return dataObjects;
+        }
+
+        this.options.dataObjects.forEach(dataObjectConfig => {
+            const dataObject = this.moddle.create('bpmn:DataObject', {
+                id: sanitizeXMLId(dataObjectConfig.id),
+                name: dataObjectConfig.name,
+                isCollection: dataObjectConfig.isCollection || false
+            });
+
+            if (dataObjectConfig.itemSubjectRef) {
+                dataObject.itemSubjectRef = { id: dataObjectConfig.itemSubjectRef };
+            }
+
+            dataObjects.push(dataObject);
+        });
+
+        return dataObjects;
+    }
+
+    /**
+     * Extract process properties from BPMN process
+     */
+    private extractProcessProperties(process: any): any {
+        const processProperties: any = {
+            documentation: '',
+            executionListeners: [],
+            eventListeners: [],
+            dataObjects: [],
+            extensionProperties: []
+        };
+
+        // Extract documentation
+        if (process.documentation && process.documentation.length > 0) {
+            processProperties.documentation = process.documentation[0].text || '';
+        }
+
+        // Extract listeners from extension elements
+        if (process.extensionElements && process.extensionElements.values) {
+            process.extensionElements.values.forEach((element: any) => {
+                // Extract execution listeners
+                if (element.$type === 'flowable:ExecutionListener' ||
+                    element.$type === 'camunda:ExecutionListener' ||
+                    element.$type === 'activiti:ExecutionListener') {
+
+                    const listener: any = {
+                        $type: element.$type,
+                        event: element.event
+                    };
+
+                    if (element.class) {
+                        listener.class = element.class;
+                    } else if (element.expression) {
+                        listener.expression = element.expression;
+                    } else if (element.delegateExpression) {
+                        listener.delegateExpression = element.delegateExpression;
+                    }
+
+                    processProperties.executionListeners.push(listener);
+                }
+
+                // Extract event listeners
+                if (element.$type === 'flowable:EventListener' ||
+                    element.$type === 'camunda:EventListener' ||
+                    element.$type === 'activiti:EventListener') {
+
+                    const listener: any = {
+                        $type: element.$type,
+                        event: element.event
+                    };
+
+                    if (element.class) {
+                        listener.class = element.class;
+                    } else if (element.expression) {
+                        listener.expression = element.expression;
+                    } else if (element.delegateExpression) {
+                        listener.delegateExpression = element.delegateExpression;
+                    }
+
+                    processProperties.eventListeners.push(listener);
+                }
+
+                // Extract extension properties
+                if (element.$type === 'flowable:Properties' ||
+                    element.$type === 'camunda:Properties' ||
+                    element.$type === 'activiti:Properties') {
+
+                    if (element.property && Array.isArray(element.property)) {
+                        element.property.forEach((prop: any) => {
+                            processProperties.extensionProperties.push({
+                                name: prop.name,
+                                value: prop.value
+                            });
+                        });
+                    }
+                }
+            });
+        }
+
+        // Extract data objects from flow elements
+        if (process.flowElements) {
+            process.flowElements.forEach((element: any) => {
+                if (element.$type === 'bpmn:DataObject') {
+                    processProperties.dataObjects.push({
+                        id: element.id,
+                        name: element.name || '',
+                        itemSubjectRef: element.itemSubjectRef?.id || '',
+                        isCollection: element.isCollection || false
+                    });
+                }
+            });
+        }
+
+        return processProperties;
+    }
+}
